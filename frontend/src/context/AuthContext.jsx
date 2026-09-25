@@ -53,6 +53,8 @@ export function AuthProvider({ children }) {
     usuario,
     cargando,
     esAdmin: usuario?.rol === "admin",
+    esGestor: usuario?.rol === "gestor_pedidos",
+    gestionaPedidos: ["admin", "gestor_pedidos"].includes(usuario?.rol),
     activo: usuario?.estado === "activo",
     login,
     registro,

@@ -18,7 +18,7 @@ CREATE TABLE usuarios (
   estado          VARCHAR(20)  NOT NULL DEFAULT 'pendiente',
   fecha_creacion  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   CONSTRAINT uq_usuarios_email UNIQUE (email),
-  CONSTRAINT ck_usuarios_rol CHECK (rol IN ('cliente', 'admin')),
+  CONSTRAINT ck_usuarios_rol CHECK (rol IN ('cliente', 'admin', 'gestor_pedidos')),
   CONSTRAINT ck_usuarios_estado CHECK (estado IN ('pendiente', 'activo', 'inactivo'))
 );
 

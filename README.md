@@ -12,11 +12,12 @@ Proyecto ubicado en `/mnt/c/taller3_24` (en Windows: `C:\taller3_24`), organizad
 
 ## 1. Script SQL para pgAdmin
 
-Archivo: `database/schema.sql`. Crea las cuatro tablas con llaves primarias, foráneas, restricciones `CHECK`, índices y cinco productos de ejemplo. Si la base ya existía antes del control de acceso de usuarios, se ejecuta una sola vez `database/migracion_estado_usuarios.sql`, que agrega la columna `estado` sin borrar datos.
+Archivo: `database/schema.sql`. Crea las cuatro tablas con llaves primarias, foráneas, restricciones `CHECK`, índices y cinco productos de ejemplo. Si la base ya existía antes del control de acceso de usuarios, se ejecutan una sola vez, en orden, `database/migracion_estado_usuarios.sql` (agrega la columna `estado`) y `database/migracion_rol_gestor.sql` (agrega el rol `gestor_pedidos`), sin borrar datos.
 
 Decisiones de modelado relevantes:
 
 - `usuarios.email` es `UNIQUE`; el backend lo guarda siempre en minúsculas.
+- `usuarios.rol` admite `cliente`, `admin` y `gestor_pedidos`.
 - `usuarios.estado` controla el acceso: `pendiente` (recién registrado), `activo` (aprobado por un administrador) o `inactivo` (desactivado).
 - `usuarios.password` almacena únicamente el hash generado con bcrypt.
 - `pedidos.usuario_id` usa `ON DELETE RESTRICT`: no se puede borrar un usuario que tenga pedidos.
@@ -45,7 +46,7 @@ CREATE TABLE usuarios (
   estado          VARCHAR(20)  NOT NULL DEFAULT 'pendiente',
   fecha_creacion  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   CONSTRAINT uq_usuarios_email UNIQUE (email),
-  CONSTRAINT ck_usuarios_rol CHECK (rol IN ('cliente', 'admin')),
+  CONSTRAINT ck_usuarios_rol CHECK (rol IN ('cliente', 'admin', 'gestor_pedidos')),
   CONSTRAINT ck_usuarios_estado CHECK (estado IN ('pendiente', 'activo', 'inactivo'))
 );
 
@@ -301,6 +302,7 @@ frontend/
 ```
 database/
 ├── migracion_estado_usuarios.sql
+├── migracion_rol_gestor.sql
 └── schema.sql
 ```
 
@@ -549,7 +551,9 @@ module.exports = DomainError;
 ```javascript
 const DomainError = require("../errors/DomainError");
 
-const ROLES = ["cliente", "admin"];
+const ROLES = ["cliente", "admin", "gestor_pedidos"];
+// Roles del personal que puede ver y atender todos los pedidos.
+const ROLES_GESTION_PEDIDOS = ["admin", "gestor_pedidos"];
 const ESTADOS = ["pendiente", "activo", "inactivo"];
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -641,6 +645,11 @@ class Usuario {
 
   esAdmin() {
     return this.rol === "admin";
+  }
+
+  // Regla de negocio: el administrador y el gestor de pedidos atienden los pedidos de todos los clientes.
+  static gestionaPedidos(rol) {
+    return ROLES_GESTION_PEDIDOS.includes(rol);
   }
 
   estaActivo() {
@@ -1255,6 +1264,7 @@ module.exports = ObtenerProducto;
 
 ```javascript
 const DomainError = require("../../../domain/errors/DomainError");
+const Usuario = require("../../../domain/entities/Usuario");
 const reponerStock = require("./reponerStock");
 
 class ActualizarEstadoPedido {
@@ -1267,8 +1277,8 @@ class ActualizarEstadoPedido {
       const pedido = await pedidoRepository.buscarPorId(id, { bloquear: true });
       if (!pedido) throw DomainError.notFound("Pedido no encontrado");
 
-      const esAdmin = solicitante.rol === "admin";
-      if (!esAdmin) {
+      // Admin y gestor pueden completar o cancelar cualquier pedido; el cliente solo cancelar los suyos.
+      if (!Usuario.gestionaPedidos(solicitante.rol)) {
         if (!pedido.perteneceA(solicitante.id)) {
           throw DomainError.forbidden("No puedes modificar pedidos de otros usuarios");
         }
@@ -1352,14 +1362,16 @@ module.exports = EliminarPedido;
 #### `backend/src/application/use-cases/pedidos/ListarPedidos.js`
 
 ```javascript
+const Usuario = require("../../../domain/entities/Usuario");
+
 class ListarPedidos {
   constructor({ pedidoRepository }) {
     this.pedidoRepository = pedidoRepository;
   }
 
-  // El administrador ve todos los pedidos; el cliente solo los suyos.
+  // El personal de pedidos (admin y gestor) ve todos; el cliente solo los suyos.
   async ejecutar(solicitante) {
-    const filtros = solicitante.rol === "admin" ? {} : { usuarioId: solicitante.id };
+    const filtros = Usuario.gestionaPedidos(solicitante.rol) ? {} : { usuarioId: solicitante.id };
     return this.pedidoRepository.listar(filtros);
   }
 }
@@ -1371,6 +1383,7 @@ module.exports = ListarPedidos;
 
 ```javascript
 const DomainError = require("../../../domain/errors/DomainError");
+const Usuario = require("../../../domain/entities/Usuario");
 
 class ObtenerPedido {
   constructor({ pedidoRepository }) {
@@ -1381,7 +1394,7 @@ class ObtenerPedido {
     const pedido = await this.pedidoRepository.buscarPorId(id);
     if (!pedido) throw DomainError.notFound("Pedido no encontrado");
 
-    if (solicitante.rol !== "admin" && !pedido.perteneceA(solicitante.id)) {
+    if (!Usuario.gestionaPedidos(solicitante.rol) && !pedido.perteneceA(solicitante.id)) {
       throw DomainError.forbidden("No puedes consultar pedidos de otros usuarios");
     }
     return pedido;
@@ -1925,10 +1938,10 @@ module.exports = {
   actualizarUsuario: {
     nombre: { type: "string" },
     email: { type: "string" },
-    rol: { type: "string", enum: ["cliente", "admin"] },
+    rol: { type: "string", enum: ["cliente", "admin", "gestor_pedidos"] },
   },
   accesoUsuario: {
-    rol: { type: "string", enum: ["cliente", "admin"] },
+    rol: { type: "string", enum: ["cliente", "admin", "gestor_pedidos"] },
     estado: { type: "string", enum: ["activo", "inactivo"] },
   },
   crearProducto: {
@@ -2158,6 +2171,7 @@ function crearRutas({ authenticate, authController, usuarioController, productoC
   const router = Router();
   const activo = [authenticate, requireActivo];
   const soloAdmin = [...activo, authorize("admin")];
+  const compradores = [...activo, authorize("cliente", "admin")];
 
   // Autenticación (el perfil también responde a cuentas pendientes o inactivas)
   router.post("/auth/registro", validate(schemas.registro), authController.registrar);
@@ -2178,8 +2192,9 @@ function crearRutas({ authenticate, authController, usuarioController, productoC
   router.put("/productos/:id", ...soloAdmin, validateId, validate(schemas.actualizarProducto), productoController.actualizar);
   router.delete("/productos/:id", ...soloAdmin, validateId, productoController.eliminar);
 
-  // Pedidos (cuentas activas; eliminar solo administradores)
-  router.post("/pedidos", ...activo, validate(schemas.crearPedido), pedidoController.crear);
+  // Pedidos (comprar: cliente y admin; consultar y cambiar estado: cuentas activas, con permisos
+  // según el rol en los casos de uso; eliminar: solo administradores)
+  router.post("/pedidos", ...compradores, validate(schemas.crearPedido), pedidoController.crear);
   router.get("/pedidos", ...activo, pedidoController.listar);
   router.get("/pedidos/:id", ...activo, validateId, pedidoController.obtener);
   router.patch("/pedidos/:id/estado", ...activo, validateId, validate(schemas.estadoPedido), pedidoController.cambiarEstado);
@@ -2548,6 +2563,8 @@ export function AuthProvider({ children }) {
     usuario,
     cargando,
     esAdmin: usuario?.rol === "admin",
+    esGestor: usuario?.rol === "gestor_pedidos",
+    gestionaPedidos: ["admin", "gestor_pedidos"].includes(usuario?.rol),
     activo: usuario?.estado === "activo",
     login,
     registro,
@@ -2635,7 +2652,7 @@ import { useAuth } from "../context/AuthContext";
 import { useCart } from "../context/CartContext";
 
 export default function Navbar() {
-  const { usuario, esAdmin, activo, logout } = useAuth();
+  const { usuario, esAdmin, esGestor, gestionaPedidos, activo, logout } = useAuth();
   const { cantidadTotal } = useCart();
   const navigate = useNavigate();
   const bloqueado = usuario && !activo;
@@ -2654,11 +2671,13 @@ export default function Navbar() {
       <nav>
         {!bloqueado && (
           <>
-            <NavLink to="/">Catálogo</NavLink>
-            <NavLink to="/carrito">
-              Carrito {cantidadTotal > 0 && <span className="insignia">{cantidadTotal}</span>}
-            </NavLink>
-            {usuario && <NavLink to="/pedidos">{esAdmin ? "Pedidos" : "Mis pedidos"}</NavLink>}
+            <NavLink to="/">Productos</NavLink>
+            {!esGestor && (
+              <NavLink to="/carrito">
+                Carrito {cantidadTotal > 0 && <span className="insignia">{cantidadTotal}</span>}
+              </NavLink>
+            )}
+            {usuario && <NavLink to="/pedidos">{gestionaPedidos ? "Pedidos" : "Mis pedidos"}</NavLink>}
             {esAdmin && <NavLink to="/usuarios">Usuarios</NavLink>}
           </>
         )}
@@ -2668,7 +2687,8 @@ export default function Navbar() {
         {usuario ? (
           <>
             <span className="usuario">
-              {usuario.nombre} {esAdmin && activo && <span className="rol">admin</span>}
+              {usuario.nombre} {activo && esAdmin && <span className="rol">admin</span>}
+              {activo && esGestor && <span className="rol">gestor</span>}
             </span>
             <button className="btn btn-ghost" onClick={salir}>
               Salir
@@ -2897,7 +2917,7 @@ export default function EsperaPage() {
 ```jsx
 import { formatoMoneda } from "../../services/api";
 
-export default function ProductCard({ producto, esAdmin, onAgregar, onEditar, onEliminar }) {
+export default function ProductCard({ producto, esAdmin, puedeComprar, onAgregar, onEditar, onEliminar }) {
   const agotado = producto.stock === 0;
 
   return (
@@ -2912,9 +2932,11 @@ export default function ProductCard({ producto, esAdmin, onAgregar, onEditar, on
       <p className="precio">{formatoMoneda(producto.precio)}</p>
 
       <div className="acciones">
-        <button className="btn" disabled={agotado} onClick={() => onAgregar(producto)}>
-          Agregar al carrito
-        </button>
+        {puedeComprar && (
+          <button className="btn" disabled={agotado} onClick={() => onAgregar(producto)}>
+            Agregar al carrito
+          </button>
+        )}
         {esAdmin && (
           <>
             <button className="btn btn-ghost" onClick={() => onEditar(producto)}>
@@ -3020,7 +3042,7 @@ import ProductCard from "./ProductCard";
 import ProductForm from "./ProductForm";
 
 export default function CatalogPage() {
-  const { esAdmin } = useAuth();
+  const { esAdmin, esGestor } = useAuth();
   const { agregar } = useCart();
   const [productos, setProductos] = useState([]);
   const [busqueda, setBusqueda] = useState("");
@@ -3076,7 +3098,7 @@ export default function CatalogPage() {
   return (
     <section>
       <div className="encabezado">
-        <h1>Catálogo</h1>
+        <h1>Productos</h1>
         <form className="buscador" onSubmit={buscar}>
           <input placeholder="Buscar producto..." value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
           <button className="btn btn-ghost">Buscar</button>
@@ -3102,6 +3124,7 @@ export default function CatalogPage() {
               key={p.id}
               producto={p}
               esAdmin={esAdmin}
+              puedeComprar={!esGestor}
               onAgregar={agregarAlCarrito}
               onEditar={setEditando}
               onEliminar={eliminar}
@@ -3236,7 +3259,7 @@ const formatoFecha = (fecha) =>
   new Date(fecha).toLocaleString("es-MX", { dateStyle: "medium", timeStyle: "short" });
 
 export default function OrdersPage() {
-  const { esAdmin } = useAuth();
+  const { esAdmin, gestionaPedidos } = useAuth();
   const location = useLocation();
   const [pedidos, setPedidos] = useState([]);
   const [cargando, setCargando] = useState(true);
@@ -3280,7 +3303,7 @@ export default function OrdersPage() {
 
   return (
     <section>
-      <h1>{esAdmin ? "Todos los pedidos" : "Mis pedidos"}</h1>
+      <h1>{gestionaPedidos ? "Todos los pedidos" : "Mis pedidos"}</h1>
       {location.state?.creado && <Alerta tipo="exito">¡Pedido creado correctamente!</Alerta>}
       <Alerta>{error}</Alerta>
 
@@ -3295,7 +3318,7 @@ export default function OrdersPage() {
                   <h3>Pedido #{pedido.id}</h3>
                   <small>
                     {formatoFecha(pedido.fechaCreacion)}
-                    {esAdmin && ` · ${pedido.cliente.nombre} (${pedido.cliente.email})`}
+                    {gestionaPedidos && ` · ${pedido.cliente.nombre} (${pedido.cliente.email})`}
                   </small>
                 </div>
                 <span className={`estado-pedido estado-${pedido.estado}`}>{pedido.estado}</span>
@@ -3315,7 +3338,7 @@ export default function OrdersPage() {
               <div className="pedido-pie">
                 <strong>Total: {formatoMoneda(pedido.total)}</strong>
                 <div className="acciones">
-                  {pedido.estado === "pendiente" && esAdmin && (
+                  {pedido.estado === "pendiente" && gestionaPedidos && (
                     <button className="btn" onClick={() => cambiarEstado(pedido, "completado")}>
                       Marcar completado
                     </button>
@@ -3356,6 +3379,14 @@ const FILTROS = [
   { valor: "todos", texto: "Todos" },
 ];
 
+const ROLES = [
+  { valor: "cliente", texto: "Cliente" },
+  { valor: "gestor_pedidos", texto: "Gestor de pedidos" },
+  { valor: "admin", texto: "Administrador" },
+];
+
+const nombreRol = (valor) => ROLES.find((r) => r.valor === valor)?.texto ?? valor;
+
 const formatoFecha = (fecha) => new Date(fecha).toLocaleDateString("es-MX", { dateStyle: "medium" });
 
 function FilaUsuario({ u, esPropio, onAcceso, onEliminar }) {
@@ -3363,7 +3394,7 @@ function FilaUsuario({ u, esPropio, onAcceso, onEliminar }) {
 
   const cambiarRol = (nuevo) => {
     setRol(nuevo);
-    if (u.estado !== "pendiente") onAcceso(u, { rol: nuevo }, `Se cambió el rol de ${u.nombre} a ${nuevo}`);
+    if (u.estado !== "pendiente") onAcceso(u, { rol: nuevo }, `Se cambió el rol de ${u.nombre} a ${nombreRol(nuevo)}`);
   };
 
   return (
@@ -3379,11 +3410,14 @@ function FilaUsuario({ u, esPropio, onAcceso, onEliminar }) {
       </td>
       <td>
         {esPropio ? (
-          <span className="chip estado-admin">{u.rol}</span>
+          <span className="chip estado-admin">{nombreRol(u.rol)}</span>
         ) : (
           <select value={rol} onChange={(e) => cambiarRol(e.target.value)}>
-            <option value="cliente">cliente</option>
-            <option value="admin">admin</option>
+            {ROLES.map((r) => (
+              <option key={r.valor} value={r.valor}>
+                {r.texto}
+              </option>
+            ))}
           </select>
         )}
       </td>
@@ -3394,7 +3428,7 @@ function FilaUsuario({ u, esPropio, onAcceso, onEliminar }) {
           <div className="acciones">
             {u.estado === "pendiente" && (
               <>
-                <button className="btn" onClick={() => onAcceso(u, { estado: "activo", rol }, `Se aprobó la cuenta de ${u.nombre} como ${rol}`)}>
+                <button className="btn" onClick={() => onAcceso(u, { estado: "activo", rol }, `Se aprobó la cuenta de ${u.nombre} como ${nombreRol(rol)}`)}>
                   Aprobar
                 </button>
                 <button className="btn btn-peligro" onClick={() => onEliminar(u, "Rechazar")}>
@@ -4316,7 +4350,7 @@ Base URL: `http://localhost:3000/api`. Las rutas marcadas con **JWT** requieren 
 | GET | `/usuarios` | JWT admin | — | 200 lista · 401 · 403 |
 | GET | `/usuarios/:id` | JWT admin | — | 200 usuario · 400 id inválido · 404 |
 | PUT | `/usuarios/:id` | JWT admin | `{ "nombre"?, "email"?, "rol"? }` | 200 usuario · 400 · 404 · 409 email duplicado o cambio del propio rol |
-| PATCH | `/usuarios/:id/acceso` | JWT admin | `{ "estado"?: "activo" \| "inactivo", "rol"?: "cliente" \| "admin" }` | 200 usuario · 400 valor no permitido · 404 · 409 acceso de la propia cuenta |
+| PATCH | `/usuarios/:id/acceso` | JWT admin | `{ "estado"?: "activo" \| "inactivo", "rol"?: "cliente" \| "admin" \| "gestor_pedidos" }` | 200 usuario · 400 valor no permitido · 404 · 409 acceso de la propia cuenta |
 | DELETE | `/usuarios/:id` | JWT admin | — | 204 · 404 · 409 tiene pedidos o es la propia cuenta |
 
 ### 6.3 Productos
@@ -4333,11 +4367,11 @@ Base URL: `http://localhost:3000/api`. Las rutas marcadas con **JWT** requieren 
 
 | Método | Ruta | Acceso | Payload | Respuestas |
 |---|---|---|---|---|
-| POST | `/pedidos` | JWT | `{ "items": [ { "productoId": 1, "cantidad": 2 } ] }` | 201 pedido con detalle y total · 400 items inválidos · 404 producto inexistente · 409 stock insuficiente |
-| GET | `/pedidos` | JWT | — | 200 lista (cliente: propios · admin: todos) |
+| POST | `/pedidos` | JWT cliente o admin | `{ "items": [ { "productoId": 1, "cantidad": 2 } ] }` | 201 pedido con detalle y total · 400 items inválidos · 404 producto inexistente · 409 stock insuficiente |
+| GET | `/pedidos` | JWT | — | 200 lista (cliente: propios · admin y gestor: todos) |
 | GET | `/pedidos/:id` | JWT | — | 200 pedido · 403 pedido ajeno · 404 |
 | PATCH | `/pedidos/:id/estado` | JWT | `{ "estado": "completado" \| "cancelado" }` | 200 pedido · 400 estado inválido · 403 cliente intentando algo distinto de cancelar su pedido · 409 transición no permitida |
-| DELETE | `/pedidos/:id` | JWT admin | — | 204 (si estaba pendiente, devuelve el stock) · 404 |
+| DELETE | `/pedidos/:id` | JWT admin | — | 204 (si estaba pendiente, devuelve el stock) · 403 gestor o cliente · 404 |
 
 ### 6.5 Reglas de negocio aplicadas
 
@@ -4345,7 +4379,7 @@ Base URL: `http://localhost:3000/api`. Las rutas marcadas con **JWT** requieren 
 - **Stock:** un pedido solo se crea si hay existencia suficiente de todos sus productos; si un producto falla, no se descuenta nada (rollback).
 - **Total:** se calcula en el servidor con los precios vigentes, en centavos para evitar errores de redondeo. El frontend nunca envía precios.
 - **Estados:** `pendiente → completado` o `pendiente → cancelado`. Cancelar devuelve el stock. `completado` y `cancelado` son estados finales.
-- **Permisos:** el cliente solo ve y cancela sus propios pedidos; el administrador gestiona todo.
+- **Roles:** el `cliente` compra, ve y cancela sus propios pedidos. El `gestor_pedidos` es personal de la tienda: ve los pedidos de todos los clientes y puede completarlos o cancelarlos, pero no compra, no elimina pedidos ni administra productos o usuarios. El `admin` gestiona todo.
 - **Aprobación de cuentas:** todo registro nuevo inicia `pendiente`. El administrador lo aprueba asignando un rol, o lo rechaza (eliminándolo). Las cuentas activas pueden desactivarse y reactivarse; ninguna vuelta a `pendiente`. El administrador no puede modificar el acceso de su propia cuenta.
 - **Sesión siempre actualizada:** el middleware `authenticate` consulta el usuario en la base de datos en cada petición mediante el caso de uso `VerificarSesion`, por lo que los cambios de rol o de estado aplican de inmediato.
 
@@ -4372,5 +4406,6 @@ Base URL: `http://localhost:3000/api`. Las rutas marcadas con **JWT** requieren 
 | `Falta la variable de entorno ...` | No existe `backend/.env` | `cp .env.example .env` y completarlo |
 | El frontend muestra "No se pudo conectar con el servidor" | Backend apagado | Arrancar la terminal 1 (Paso 5) |
 | Tras cambiar el rol no aparecen los botones | La página aún no consultó el perfil | Recargar la página |
+| `violates check constraint "ck_usuarios_rol"` al asignar gestor | Falta la migración del nuevo rol | Ejecutar `database/migracion_rol_gestor.sql` |
 | `column "estado" does not exist` | La base se creó antes del control de acceso | Ejecutar `database/migracion_estado_usuarios.sql` |
 | `EADDRINUSE: address already in use :::3000` | Otro proceso usa el puerto (por ejemplo, el proyecto anterior) | Cerrar la otra terminal con `Ctrl + C` |

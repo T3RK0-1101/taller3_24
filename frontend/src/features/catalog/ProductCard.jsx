@@ -1,6 +1,6 @@
 import { formatoMoneda } from "../../services/api";
 
-export default function ProductCard({ producto, esAdmin, onAgregar, onEditar, onEliminar }) {
+export default function ProductCard({ producto, esAdmin, puedeComprar, onAgregar, onEditar, onEliminar }) {
   const agotado = producto.stock === 0;
 
   return (
@@ -15,9 +15,11 @@ export default function ProductCard({ producto, esAdmin, onAgregar, onEditar, on
       <p className="precio">{formatoMoneda(producto.precio)}</p>
 
       <div className="acciones">
-        <button className="btn" disabled={agotado} onClick={() => onAgregar(producto)}>
-          Agregar al carrito
-        </button>
+        {puedeComprar && (
+          <button className="btn" disabled={agotado} onClick={() => onAgregar(producto)}>
+            Agregar al carrito
+          </button>
+        )}
         {esAdmin && (
           <>
             <button className="btn btn-ghost" onClick={() => onEditar(producto)}>

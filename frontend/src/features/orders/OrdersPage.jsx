@@ -8,7 +8,7 @@ const formatoFecha = (fecha) =>
   new Date(fecha).toLocaleString("es-MX", { dateStyle: "medium", timeStyle: "short" });
 
 export default function OrdersPage() {
-  const { esAdmin } = useAuth();
+  const { esAdmin, gestionaPedidos } = useAuth();
   const location = useLocation();
   const [pedidos, setPedidos] = useState([]);
   const [cargando, setCargando] = useState(true);
@@ -52,7 +52,7 @@ export default function OrdersPage() {
 
   return (
     <section>
-      <h1>{esAdmin ? "Todos los pedidos" : "Mis pedidos"}</h1>
+      <h1>{gestionaPedidos ? "Todos los pedidos" : "Mis pedidos"}</h1>
       {location.state?.creado && <Alerta tipo="exito">¡Pedido creado correctamente!</Alerta>}
       <Alerta>{error}</Alerta>
 
@@ -67,7 +67,7 @@ export default function OrdersPage() {
                   <h3>Pedido #{pedido.id}</h3>
                   <small>
                     {formatoFecha(pedido.fechaCreacion)}
-                    {esAdmin && ` · ${pedido.cliente.nombre} (${pedido.cliente.email})`}
+                    {gestionaPedidos && ` · ${pedido.cliente.nombre} (${pedido.cliente.email})`}
                   </small>
                 </div>
                 <span className={`estado-pedido estado-${pedido.estado}`}>{pedido.estado}</span>
@@ -87,7 +87,7 @@ export default function OrdersPage() {
               <div className="pedido-pie">
                 <strong>Total: {formatoMoneda(pedido.total)}</strong>
                 <div className="acciones">
-                  {pedido.estado === "pendiente" && esAdmin && (
+                  {pedido.estado === "pendiente" && gestionaPedidos && (
                     <button className="btn" onClick={() => cambiarEstado(pedido, "completado")}>
                       Marcar completado
                     </button>

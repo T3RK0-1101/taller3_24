@@ -1,4 +1,5 @@
 const DomainError = require("../../../domain/errors/DomainError");
+const Usuario = require("../../../domain/entities/Usuario");
 const reponerStock = require("./reponerStock");
 
 class ActualizarEstadoPedido {
@@ -11,8 +12,8 @@ class ActualizarEstadoPedido {
       const pedido = await pedidoRepository.buscarPorId(id, { bloquear: true });
       if (!pedido) throw DomainError.notFound("Pedido no encontrado");
 
-      const esAdmin = solicitante.rol === "admin";
-      if (!esAdmin) {
+      // Admin y gestor pueden completar o cancelar cualquier pedido; el cliente solo cancelar los suyos.
+      if (!Usuario.gestionaPedidos(solicitante.rol)) {
         if (!pedido.perteneceA(solicitante.id)) {
           throw DomainError.forbidden("No puedes modificar pedidos de otros usuarios");
         }

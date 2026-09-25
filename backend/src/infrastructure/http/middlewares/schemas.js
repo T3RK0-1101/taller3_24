@@ -12,10 +12,10 @@ module.exports = {
   actualizarUsuario: {
     nombre: { type: "string" },
     email: { type: "string" },
-    rol: { type: "string", enum: ["cliente", "admin"] },
+    rol: { type: "string", enum: ["cliente", "admin", "gestor_pedidos"] },
   },
   accesoUsuario: {
-    rol: { type: "string", enum: ["cliente", "admin"] },
+    rol: { type: "string", enum: ["cliente", "admin", "gestor_pedidos"] },
     estado: { type: "string", enum: ["activo", "inactivo"] },
   },
   crearProducto: {

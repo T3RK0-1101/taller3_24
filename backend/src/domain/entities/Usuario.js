@@ -1,6 +1,8 @@
 const DomainError = require("../errors/DomainError");
 
-const ROLES = ["cliente", "admin"];
+const ROLES = ["cliente", "admin", "gestor_pedidos"];
+// Roles del personal que puede ver y atender todos los pedidos.
+const ROLES_GESTION_PEDIDOS = ["admin", "gestor_pedidos"];
 const ESTADOS = ["pendiente", "activo", "inactivo"];
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -92,6 +94,11 @@ class Usuario {
 
   esAdmin() {
     return this.rol === "admin";
+  }
+
+  // Regla de negocio: el administrador y el gestor de pedidos atienden los pedidos de todos los clientes.
+  static gestionaPedidos(rol) {
+    return ROLES_GESTION_PEDIDOS.includes(rol);
   }
 
   estaActivo() {

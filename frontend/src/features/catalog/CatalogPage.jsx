@@ -7,7 +7,7 @@ import ProductCard from "./ProductCard";
 import ProductForm from "./ProductForm";
 
 export default function CatalogPage() {
-  const { esAdmin } = useAuth();
+  const { esAdmin, esGestor } = useAuth();
   const { agregar } = useCart();
   const [productos, setProductos] = useState([]);
   const [busqueda, setBusqueda] = useState("");
@@ -63,7 +63,7 @@ export default function CatalogPage() {
   return (
     <section>
       <div className="encabezado">
-        <h1>Catálogo</h1>
+        <h1>Productos</h1>
         <form className="buscador" onSubmit={buscar}>
           <input placeholder="Buscar producto..." value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
           <button className="btn btn-ghost">Buscar</button>
@@ -89,6 +89,7 @@ export default function CatalogPage() {
               key={p.id}
               producto={p}
               esAdmin={esAdmin}
+              puedeComprar={!esGestor}
               onAgregar={agregarAlCarrito}
               onEditar={setEditando}
               onEliminar={eliminar}

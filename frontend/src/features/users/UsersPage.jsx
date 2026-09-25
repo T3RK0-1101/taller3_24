@@ -10,6 +10,14 @@ const FILTROS = [
   { valor: "todos", texto: "Todos" },
 ];
 
+const ROLES = [
+  { valor: "cliente", texto: "Cliente" },
+  { valor: "gestor_pedidos", texto: "Gestor de pedidos" },
+  { valor: "admin", texto: "Administrador" },
+];
+
+const nombreRol = (valor) => ROLES.find((r) => r.valor === valor)?.texto ?? valor;
+
 const formatoFecha = (fecha) => new Date(fecha).toLocaleDateString("es-MX", { dateStyle: "medium" });
 
 function FilaUsuario({ u, esPropio, onAcceso, onEliminar }) {
@@ -17,7 +25,7 @@ function FilaUsuario({ u, esPropio, onAcceso, onEliminar }) {
 
   const cambiarRol = (nuevo) => {
     setRol(nuevo);
-    if (u.estado !== "pendiente") onAcceso(u, { rol: nuevo }, `Se cambió el rol de ${u.nombre} a ${nuevo}`);
+    if (u.estado !== "pendiente") onAcceso(u, { rol: nuevo }, `Se cambió el rol de ${u.nombre} a ${nombreRol(nuevo)}`);
   };
 
   return (
@@ -33,11 +41,14 @@ function FilaUsuario({ u, esPropio, onAcceso, onEliminar }) {
       </td>
       <td>
         {esPropio ? (
-          <span className="chip estado-admin">{u.rol}</span>
+          <span className="chip estado-admin">{nombreRol(u.rol)}</span>
         ) : (
           <select value={rol} onChange={(e) => cambiarRol(e.target.value)}>
-            <option value="cliente">cliente</option>
-            <option value="admin">admin</option>
+            {ROLES.map((r) => (
+              <option key={r.valor} value={r.valor}>
+                {r.texto}
+              </option>
+            ))}
           </select>
         )}
       </td>
@@ -48,7 +59,7 @@ function FilaUsuario({ u, esPropio, onAcceso, onEliminar }) {
           <div className="acciones">
             {u.estado === "pendiente" && (
               <>
-                <button className="btn" onClick={() => onAcceso(u, { estado: "activo", rol }, `Se aprobó la cuenta de ${u.nombre} como ${rol}`)}>
+                <button className="btn" onClick={() => onAcceso(u, { estado: "activo", rol }, `Se aprobó la cuenta de ${u.nombre} como ${nombreRol(rol)}`)}>
                   Aprobar
                 </button>
                 <button className="btn btn-peligro" onClick={() => onEliminar(u, "Rechazar")}>

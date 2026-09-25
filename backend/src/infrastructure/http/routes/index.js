@@ -8,6 +8,7 @@ function crearRutas({ authenticate, authController, usuarioController, productoC
   const router = Router();
   const activo = [authenticate, requireActivo];
   const soloAdmin = [...activo, authorize("admin")];
+  const compradores = [...activo, authorize("cliente", "admin")];
 
   // Autenticación (el perfil también responde a cuentas pendientes o inactivas)
   router.post("/auth/registro", validate(schemas.registro), authController.registrar);
@@ -28,8 +29,9 @@ function crearRutas({ authenticate, authController, usuarioController, productoC
   router.put("/productos/:id", ...soloAdmin, validateId, validate(schemas.actualizarProducto), productoController.actualizar);
   router.delete("/productos/:id", ...soloAdmin, validateId, productoController.eliminar);
 
-  // Pedidos (cuentas activas; eliminar solo administradores)
-  router.post("/pedidos", ...activo, validate(schemas.crearPedido), pedidoController.crear);
+  // Pedidos (comprar: cliente y admin; consultar y cambiar estado: cuentas activas, con permisos
+  // según el rol en los casos de uso; eliminar: solo administradores)
+  router.post("/pedidos", ...compradores, validate(schemas.crearPedido), pedidoController.crear);
   router.get("/pedidos", ...activo, pedidoController.listar);
   router.get("/pedidos/:id", ...activo, validateId, pedidoController.obtener);
   router.patch("/pedidos/:id/estado", ...activo, validateId, validate(schemas.estadoPedido), pedidoController.cambiarEstado);
