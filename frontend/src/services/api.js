@@ -37,6 +37,8 @@ async function request(path, { method = "GET", body } = {}) {
 
   if (!respuesta.ok) {
     if (respuesta.status === 401 && token) window.dispatchEvent(new Event("auth:expired"));
+    // Un 403 puede significar que la cuenta cambió de estado: se vuelve a consultar el perfil.
+    if (respuesta.status === 403 && token) window.dispatchEvent(new Event("auth:refrescar"));
     throw new ApiError(datos?.error ?? "Error inesperado del servidor", respuesta.status, datos?.detalles);
   }
   return datos;
@@ -46,6 +48,12 @@ export const authApi = {
   registro: (datos) => request("/auth/registro", { method: "POST", body: datos }),
   login: (credenciales) => request("/auth/login", { method: "POST", body: credenciales }),
   perfil: () => request("/auth/perfil"),
+};
+
+export const usuariosApi = {
+  listar: () => request("/usuarios"),
+  cambiarAcceso: (id, datos) => request(`/usuarios/${id}/acceso`, { method: "PATCH", body: datos }),
+  eliminar: (id) => request(`/usuarios/${id}`, { method: "DELETE" }),
 };
 
 export const productosApi = {

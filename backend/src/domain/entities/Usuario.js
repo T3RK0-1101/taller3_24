@@ -1,15 +1,17 @@
 const DomainError = require("../errors/DomainError");
 
 const ROLES = ["cliente", "admin"];
+const ESTADOS = ["pendiente", "activo", "inactivo"];
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 class Usuario {
-  constructor({ id = null, nombre, email, password = null, rol = "cliente", fechaCreacion = null }) {
+  constructor({ id = null, nombre, email, password = null, rol = "cliente", estado = "pendiente", fechaCreacion = null }) {
     this.id = id;
     this.nombre = nombre;
     this.email = email;
     this.password = password;
     this.rol = rol;
+    this.estado = estado;
     this.fechaCreacion = fechaCreacion;
   }
 
@@ -52,12 +54,21 @@ class Usuario {
     return rol;
   }
 
-  static crear({ nombre, email, passwordHash, rol = "cliente" }) {
+  static validarEstado(estado) {
+    if (!ESTADOS.includes(estado)) {
+      throw DomainError.validation(`El estado debe ser uno de: ${ESTADOS.join(", ")}`);
+    }
+    return estado;
+  }
+
+  // Regla de negocio: toda cuenta nueva queda pendiente hasta que un administrador la apruebe.
+  static crear({ nombre, email, passwordHash }) {
     return new Usuario({
       nombre: Usuario.validarNombre(nombre),
       email: Usuario.validarEmail(email),
       password: passwordHash,
-      rol: Usuario.validarRol(rol),
+      rol: "cliente",
+      estado: "pendiente",
     });
   }
 
@@ -67,8 +78,24 @@ class Usuario {
     if (rol !== undefined) this.rol = Usuario.validarRol(rol);
   }
 
+  // Regla de negocio: una cuenta no puede regresar a "pendiente" una vez revisada.
+  cambiarAcceso({ rol, estado }) {
+    if (rol !== undefined) this.rol = Usuario.validarRol(rol);
+    if (estado !== undefined) {
+      Usuario.validarEstado(estado);
+      if (estado === "pendiente" && this.estado !== "pendiente") {
+        throw DomainError.conflict("Una cuenta ya revisada no puede volver a quedar pendiente");
+      }
+      this.estado = estado;
+    }
+  }
+
   esAdmin() {
     return this.rol === "admin";
+  }
+
+  estaActivo() {
+    return this.estado === "activo";
   }
 
   // Representación segura: nunca expone la contraseña.
@@ -78,11 +105,13 @@ class Usuario {
       nombre: this.nombre,
       email: this.email,
       rol: this.rol,
+      estado: this.estado,
       fechaCreacion: this.fechaCreacion,
     };
   }
 }
 
 Usuario.ROLES = ROLES;
+Usuario.ESTADOS = ESTADOS;
 
 module.exports = Usuario;

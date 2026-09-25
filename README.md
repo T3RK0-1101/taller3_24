@@ -1,22 +1,23 @@
-# Taller 3 · Aplicación Full-Stack con Arquitectura Hexagonal
+# Pablo Store · Aplicación Full-Stack con Arquitectura Hexagonal
 
 Node.js + Express (backend) · React + Vite (frontend) · PostgreSQL (base de datos)
 
 Proyecto ubicado en `/mnt/c/taller3_24` (en Windows: `C:\taller3_24`), organizado en tres carpetas:
 
 - `database/` script SQL para pgAdmin.
-- `backend/` API REST con arquitectura hexagonal (52 archivos).
-- `frontend/` aplicación SPA en React (21 archivos).
+- `backend/` API REST con arquitectura hexagonal (55 archivos).
+- `frontend/` aplicación SPA en React (23 archivos).
 
 ---
 
 ## 1. Script SQL para pgAdmin
 
-Archivo: `database/schema.sql`. Crea las cuatro tablas con llaves primarias, foráneas, restricciones `CHECK`, índices y cinco productos de ejemplo.
+Archivo: `database/schema.sql`. Crea las cuatro tablas con llaves primarias, foráneas, restricciones `CHECK`, índices y cinco productos de ejemplo. Si la base ya existía antes del control de acceso de usuarios, se ejecuta una sola vez `database/migracion_estado_usuarios.sql`, que agrega la columna `estado` sin borrar datos.
 
 Decisiones de modelado relevantes:
 
 - `usuarios.email` es `UNIQUE`; el backend lo guarda siempre en minúsculas.
+- `usuarios.estado` controla el acceso: `pendiente` (recién registrado), `activo` (aprobado por un administrador) o `inactivo` (desactivado).
 - `usuarios.password` almacena únicamente el hash generado con bcrypt.
 - `pedidos.usuario_id` usa `ON DELETE RESTRICT`: no se puede borrar un usuario que tenga pedidos.
 - `detalle_pedidos.pedido_id` usa `ON DELETE CASCADE`: al eliminar un pedido se elimina su detalle.
@@ -41,9 +42,11 @@ CREATE TABLE usuarios (
   email           VARCHAR(150) NOT NULL,
   password        VARCHAR(255) NOT NULL,
   rol             VARCHAR(20)  NOT NULL DEFAULT 'cliente',
+  estado          VARCHAR(20)  NOT NULL DEFAULT 'pendiente',
   fecha_creacion  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   CONSTRAINT uq_usuarios_email UNIQUE (email),
-  CONSTRAINT ck_usuarios_rol CHECK (rol IN ('cliente', 'admin'))
+  CONSTRAINT ck_usuarios_rol CHECK (rol IN ('cliente', 'admin')),
+  CONSTRAINT ck_usuarios_estado CHECK (estado IN ('pendiente', 'activo', 'inactivo'))
 );
 
 -- ---------- productos ----------
@@ -88,6 +91,7 @@ CREATE TABLE detalle_pedidos (
 );
 
 -- ---------- índices ----------
+CREATE INDEX idx_usuarios_estado      ON usuarios (estado);
 CREATE INDEX idx_productos_nombre      ON productos (LOWER(nombre));
 CREATE INDEX idx_pedidos_usuario_id    ON pedidos (usuario_id);
 CREATE INDEX idx_pedidos_estado        ON pedidos (estado);
@@ -207,12 +211,14 @@ backend/
 │   │       │   ├── ListarProductos.js
 │   │       │   └── ObtenerProducto.js
 │   │       └── usuarios/
+│   │           ├── ActualizarAccesoUsuario.js
 │   │           ├── ActualizarUsuario.js
 │   │           ├── EliminarUsuario.js
 │   │           ├── IniciarSesion.js
 │   │           ├── ListarUsuarios.js
 │   │           ├── ObtenerUsuario.js
-│   │           └── RegistrarUsuario.js
+│   │           ├── RegistrarUsuario.js
+│   │           └── VerificarSesion.js
 │   ├── config/
 │   │   └── env.js
 │   ├── domain/
@@ -241,6 +247,7 @@ backend/
 │   │   │   │   ├── authenticate.js
 │   │   │   │   ├── authorize.js
 │   │   │   │   ├── errorHandler.js
+│   │   │   │   ├── requireActivo.js
 │   │   │   │   ├── schemas.js
 │   │   │   │   └── validate.js
 │   │   │   ├── routes/
@@ -267,15 +274,18 @@ frontend/
 │   │   └── CartContext.jsx
 │   ├── features/
 │   │   ├── auth/
+│   │   │   ├── EsperaPage.jsx
 │   │   │   ├── LoginPage.jsx
 │   │   │   └── RegisterPage.jsx
 │   │   ├── catalog/
 │   │   │   ├── CatalogPage.jsx
 │   │   │   ├── ProductCard.jsx
 │   │   │   └── ProductForm.jsx
-│   │   └── orders/
-│   │       ├── CartPage.jsx
-│   │       └── OrdersPage.jsx
+│   │   ├── orders/
+│   │   │   ├── CartPage.jsx
+│   │   │   └── OrdersPage.jsx
+│   │   └── users/
+│   │       └── UsersPage.jsx
 │   ├── services/
 │   │   └── api.js
 │   ├── App.jsx
@@ -290,6 +300,7 @@ frontend/
 
 ```
 database/
+├── migracion_estado_usuarios.sql
 └── schema.sql
 ```
 
@@ -392,16 +403,16 @@ Abrir `http://localhost:5173` en el navegador. Vite reenvía las peticiones `/ap
 
 ### Paso 7. Crear el primer administrador
 
-1. En el navegador, registrarse con cualquier cuenta (se crea como `cliente`).
+1. En el navegador, registrarse con cualquier cuenta (se crea como `cliente` en estado `pendiente` y muestra la pantalla de espera).
 2. En pgAdmin (Query Tool de `taller3_24`):
 
    ```sql
-   UPDATE usuarios SET rol = 'admin' WHERE email = 'tu_correo@ejemplo.com';
+   UPDATE usuarios SET rol = 'admin', estado = 'activo' WHERE email = 'tu_correo@ejemplo.com';
    ```
 
-3. En la aplicación, **Salir** e iniciar sesión otra vez (el rol viaja dentro del token, por lo que se necesita un token nuevo).
+3. En la aplicación, pulsar **Comprobar ahora** en la pantalla de espera (o esperar 10 segundos). El backend consulta el rol y el estado en cada petición, por lo que no es necesario volver a iniciar sesión.
 
-Con el rol `admin` aparecen los botones para crear, editar y eliminar productos y para gestionar todos los pedidos.
+Con el rol `admin` aparecen la sección **Usuarios** y los botones para gestionar productos y pedidos. A partir de aquí, cada cuenta nueva se aprueba desde **Usuarios**.
 
 ### Paso 8. Revisión de código con Oxlint
 
@@ -539,15 +550,17 @@ module.exports = DomainError;
 const DomainError = require("../errors/DomainError");
 
 const ROLES = ["cliente", "admin"];
+const ESTADOS = ["pendiente", "activo", "inactivo"];
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 class Usuario {
-  constructor({ id = null, nombre, email, password = null, rol = "cliente", fechaCreacion = null }) {
+  constructor({ id = null, nombre, email, password = null, rol = "cliente", estado = "pendiente", fechaCreacion = null }) {
     this.id = id;
     this.nombre = nombre;
     this.email = email;
     this.password = password;
     this.rol = rol;
+    this.estado = estado;
     this.fechaCreacion = fechaCreacion;
   }
 
@@ -590,12 +603,21 @@ class Usuario {
     return rol;
   }
 
-  static crear({ nombre, email, passwordHash, rol = "cliente" }) {
+  static validarEstado(estado) {
+    if (!ESTADOS.includes(estado)) {
+      throw DomainError.validation(`El estado debe ser uno de: ${ESTADOS.join(", ")}`);
+    }
+    return estado;
+  }
+
+  // Regla de negocio: toda cuenta nueva queda pendiente hasta que un administrador la apruebe.
+  static crear({ nombre, email, passwordHash }) {
     return new Usuario({
       nombre: Usuario.validarNombre(nombre),
       email: Usuario.validarEmail(email),
       password: passwordHash,
-      rol: Usuario.validarRol(rol),
+      rol: "cliente",
+      estado: "pendiente",
     });
   }
 
@@ -605,8 +627,24 @@ class Usuario {
     if (rol !== undefined) this.rol = Usuario.validarRol(rol);
   }
 
+  // Regla de negocio: una cuenta no puede regresar a "pendiente" una vez revisada.
+  cambiarAcceso({ rol, estado }) {
+    if (rol !== undefined) this.rol = Usuario.validarRol(rol);
+    if (estado !== undefined) {
+      Usuario.validarEstado(estado);
+      if (estado === "pendiente" && this.estado !== "pendiente") {
+        throw DomainError.conflict("Una cuenta ya revisada no puede volver a quedar pendiente");
+      }
+      this.estado = estado;
+    }
+  }
+
   esAdmin() {
     return this.rol === "admin";
+  }
+
+  estaActivo() {
+    return this.estado === "activo";
   }
 
   // Representación segura: nunca expone la contraseña.
@@ -616,12 +654,14 @@ class Usuario {
       nombre: this.nombre,
       email: this.email,
       rol: this.rol,
+      estado: this.estado,
       fechaCreacion: this.fechaCreacion,
     };
   }
 }
 
 Usuario.ROLES = ROLES;
+Usuario.ESTADOS = ESTADOS;
 
 module.exports = Usuario;
 ```
@@ -910,6 +950,34 @@ class UsuarioRepository {
 module.exports = UsuarioRepository;
 ```
 
+#### `backend/src/application/use-cases/usuarios/ActualizarAccesoUsuario.js`
+
+```javascript
+const DomainError = require("../../../domain/errors/DomainError");
+
+// El administrador aprueba, desactiva o reactiva cuentas y decide su rol.
+class ActualizarAccesoUsuario {
+  constructor({ usuarioRepository }) {
+    this.usuarioRepository = usuarioRepository;
+  }
+
+  async ejecutar(id, { rol, estado }, solicitante) {
+    if (id === solicitante.id) {
+      throw DomainError.conflict("No puedes modificar el acceso de tu propia cuenta");
+    }
+
+    const usuario = await this.usuarioRepository.buscarPorId(id);
+    if (!usuario) throw DomainError.notFound("Usuario no encontrado");
+
+    usuario.cambiarAcceso({ rol, estado });
+    const actualizado = await this.usuarioRepository.actualizar(usuario);
+    return actualizado.toPublic();
+  }
+}
+
+module.exports = ActualizarAccesoUsuario;
+```
+
 #### `backend/src/application/use-cases/usuarios/ActualizarUsuario.js`
 
 ```javascript
@@ -1062,6 +1130,30 @@ class RegistrarUsuario {
 }
 
 module.exports = RegistrarUsuario;
+```
+
+#### `backend/src/application/use-cases/usuarios/VerificarSesion.js`
+
+```javascript
+const DomainError = require("../../../domain/errors/DomainError");
+
+// Valida el token y obtiene el usuario actualizado desde la base de datos.
+// Así, los cambios de rol o de estado aplican de inmediato, sin volver a iniciar sesión.
+class VerificarSesion {
+  constructor({ tokenService, usuarioRepository }) {
+    this.tokenService = tokenService;
+    this.usuarioRepository = usuarioRepository;
+  }
+
+  async ejecutar(token) {
+    const payload = this.tokenService.verificar(token);
+    const usuario = await this.usuarioRepository.buscarPorId(payload.id);
+    if (!usuario) throw DomainError.unauthorized("La sesión ya no es válida");
+    return usuario.toPublic();
+  }
+}
+
+module.exports = VerificarSesion;
 ```
 
 #### `backend/src/application/use-cases/productos/ActualizarProducto.js`
@@ -1576,6 +1668,7 @@ const aEntidad = (fila) =>
     email: fila.email,
     password: fila.password,
     rol: fila.rol,
+    estado: fila.estado,
     fechaCreacion: fila.fecha_creacion,
   });
 
@@ -1587,9 +1680,9 @@ class PgUsuarioRepository extends UsuarioRepository {
 
   async crear(usuario) {
     const { rows } = await this.pg.query(
-      `INSERT INTO usuarios (nombre, email, password, rol)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [usuario.nombre, usuario.email, usuario.password, usuario.rol]
+      `INSERT INTO usuarios (nombre, email, password, rol, estado)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [usuario.nombre, usuario.email, usuario.password, usuario.rol, usuario.estado]
     );
     return aEntidad(rows[0]);
   }
@@ -1604,16 +1697,20 @@ class PgUsuarioRepository extends UsuarioRepository {
     return aEntidad(rows[0]);
   }
 
+  // Los pendientes aparecen primero para que el administrador los atienda.
   async listar() {
-    const { rows } = await this.pg.query("SELECT * FROM usuarios ORDER BY id");
+    const { rows } = await this.pg.query(
+      `SELECT * FROM usuarios
+       ORDER BY CASE estado WHEN 'pendiente' THEN 0 WHEN 'activo' THEN 1 ELSE 2 END, id`
+    );
     return rows.map(aEntidad);
   }
 
   async actualizar(usuario) {
     const { rows } = await this.pg.query(
-      `UPDATE usuarios SET nombre = $1, email = $2, rol = $3
-       WHERE id = $4 RETURNING *`,
-      [usuario.nombre, usuario.email, usuario.rol, usuario.id]
+      `UPDATE usuarios SET nombre = $1, email = $2, rol = $3, estado = $4
+       WHERE id = $5 RETURNING *`,
+      [usuario.nombre, usuario.email, usuario.rol, usuario.estado, usuario.id]
     );
     return aEntidad(rows[0]);
   }
@@ -1728,13 +1825,13 @@ module.exports = JwtTokenService;
 ```javascript
 const DomainError = require("../../../domain/errors/DomainError");
 
-// Verifica el token JWT del encabezado Authorization: Bearer <token>.
-const crearAuthenticate = (tokenService) => (req, res, next) => {
+// Verifica el token JWT del encabezado Authorization: Bearer <token>
+// y carga el usuario actualizado (rol y estado) desde la base de datos.
+const crearAuthenticate = (verificarSesion) => async (req, res, next) => {
   const [tipo, token] = (req.headers.authorization ?? "").split(" ");
   if (tipo !== "Bearer" || !token) throw DomainError.unauthorized("Se requiere un token de acceso");
 
-  const payload = tokenService.verificar(token);
-  req.usuario = { id: payload.id, email: payload.email, rol: payload.rol };
+  req.usuario = await verificarSesion.ejecutar(token);
   next();
 };
 
@@ -1792,6 +1889,25 @@ const errorHandler = (error, req, res, next) => {
 module.exports = { notFound, errorHandler };
 ```
 
+#### `backend/src/infrastructure/http/middlewares/requireActivo.js`
+
+```javascript
+const DomainError = require("../../../domain/errors/DomainError");
+
+const MENSAJES = {
+  pendiente: "Tu cuenta está pendiente de aprobación por un administrador",
+  inactivo: "Tu cuenta fue desactivada. Contacta a un administrador",
+};
+
+// Solo las cuentas activas pueden operar. Debe usarse después de authenticate.
+const requireActivo = (req, res, next) => {
+  if (req.usuario.estado !== "activo") throw DomainError.forbidden(MENSAJES[req.usuario.estado]);
+  next();
+};
+
+module.exports = requireActivo;
+```
+
 #### `backend/src/infrastructure/http/middlewares/schemas.js`
 
 ```javascript
@@ -1810,6 +1926,10 @@ module.exports = {
     nombre: { type: "string" },
     email: { type: "string" },
     rol: { type: "string", enum: ["cliente", "admin"] },
+  },
+  accesoUsuario: {
+    rol: { type: "string", enum: ["cliente", "admin"] },
+    estado: { type: "string", enum: ["activo", "inactivo"] },
   },
   crearProducto: {
     nombre: { type: "string", required: true },
@@ -1990,10 +2110,11 @@ module.exports = ProductoController;
 
 ```javascript
 class UsuarioController {
-  constructor({ listarUsuarios, obtenerUsuario, actualizarUsuario, eliminarUsuario }) {
+  constructor({ listarUsuarios, obtenerUsuario, actualizarUsuario, actualizarAccesoUsuario, eliminarUsuario }) {
     this.listarUsuarios = listarUsuarios;
     this.obtenerUsuario = obtenerUsuario;
     this.actualizarUsuario = actualizarUsuario;
+    this.actualizarAccesoUsuario = actualizarAccesoUsuario;
     this.eliminarUsuario = eliminarUsuario;
   }
 
@@ -2010,6 +2131,11 @@ class UsuarioController {
     res.json(await this.actualizarUsuario.ejecutar(req.params.id, { nombre, email, rol }, req.usuario));
   };
 
+  cambiarAcceso = async (req, res) => {
+    const { rol, estado } = req.body;
+    res.json(await this.actualizarAccesoUsuario.ejecutar(req.params.id, { rol, estado }, req.usuario));
+  };
+
   eliminar = async (req, res) => {
     await this.eliminarUsuario.ejecutar(req.params.id, req.usuario);
     res.status(204).end();
@@ -2024,14 +2150,16 @@ module.exports = UsuarioController;
 ```javascript
 const { Router } = require("express");
 const authorize = require("../middlewares/authorize");
+const requireActivo = require("../middlewares/requireActivo");
 const { validate, validateId } = require("../middlewares/validate");
 const schemas = require("../middlewares/schemas");
 
 function crearRutas({ authenticate, authController, usuarioController, productoController, pedidoController }) {
   const router = Router();
-  const soloAdmin = [authenticate, authorize("admin")];
+  const activo = [authenticate, requireActivo];
+  const soloAdmin = [...activo, authorize("admin")];
 
-  // Autenticación
+  // Autenticación (el perfil también responde a cuentas pendientes o inactivas)
   router.post("/auth/registro", validate(schemas.registro), authController.registrar);
   router.post("/auth/login", validate(schemas.login), authController.login);
   router.get("/auth/perfil", authenticate, authController.perfil);
@@ -2040,6 +2168,7 @@ function crearRutas({ authenticate, authController, usuarioController, productoC
   router.get("/usuarios", ...soloAdmin, usuarioController.listar);
   router.get("/usuarios/:id", ...soloAdmin, validateId, usuarioController.obtener);
   router.put("/usuarios/:id", ...soloAdmin, validateId, validate(schemas.actualizarUsuario), usuarioController.actualizar);
+  router.patch("/usuarios/:id/acceso", ...soloAdmin, validateId, validate(schemas.accesoUsuario), usuarioController.cambiarAcceso);
   router.delete("/usuarios/:id", ...soloAdmin, validateId, usuarioController.eliminar);
 
   // Productos (lectura pública, escritura solo administradores)
@@ -2049,11 +2178,11 @@ function crearRutas({ authenticate, authController, usuarioController, productoC
   router.put("/productos/:id", ...soloAdmin, validateId, validate(schemas.actualizarProducto), productoController.actualizar);
   router.delete("/productos/:id", ...soloAdmin, validateId, productoController.eliminar);
 
-  // Pedidos (usuarios autenticados; eliminar solo administradores)
-  router.post("/pedidos", authenticate, validate(schemas.crearPedido), pedidoController.crear);
-  router.get("/pedidos", authenticate, pedidoController.listar);
-  router.get("/pedidos/:id", authenticate, validateId, pedidoController.obtener);
-  router.patch("/pedidos/:id/estado", authenticate, validateId, validate(schemas.estadoPedido), pedidoController.cambiarEstado);
+  // Pedidos (cuentas activas; eliminar solo administradores)
+  router.post("/pedidos", ...activo, validate(schemas.crearPedido), pedidoController.crear);
+  router.get("/pedidos", ...activo, pedidoController.listar);
+  router.get("/pedidos/:id", ...activo, validateId, pedidoController.obtener);
+  router.patch("/pedidos/:id/estado", ...activo, validateId, validate(schemas.estadoPedido), pedidoController.cambiarEstado);
   router.delete("/pedidos/:id", ...soloAdmin, validateId, pedidoController.eliminar);
 
   return router;
@@ -2119,6 +2248,8 @@ const ObtenerUsuario = require("./application/use-cases/usuarios/ObtenerUsuario"
 const ListarUsuarios = require("./application/use-cases/usuarios/ListarUsuarios");
 const ActualizarUsuario = require("./application/use-cases/usuarios/ActualizarUsuario");
 const EliminarUsuario = require("./application/use-cases/usuarios/EliminarUsuario");
+const VerificarSesion = require("./application/use-cases/usuarios/VerificarSesion");
+const ActualizarAccesoUsuario = require("./application/use-cases/usuarios/ActualizarAccesoUsuario");
 const CrearProducto = require("./application/use-cases/productos/CrearProducto");
 const ListarProductos = require("./application/use-cases/productos/ListarProductos");
 const ObtenerProducto = require("./application/use-cases/productos/ObtenerProducto");
@@ -2146,7 +2277,7 @@ const obtenerUsuario = new ObtenerUsuario({ usuarioRepository });
 
 const app = crearApp({
   corsOrigin: config.corsOrigin,
-  authenticate: crearAuthenticate(tokenService),
+  authenticate: crearAuthenticate(new VerificarSesion({ tokenService, usuarioRepository })),
   authController: new AuthController({
     registrarUsuario: new RegistrarUsuario({ usuarioRepository, passwordHasher }),
     iniciarSesion: new IniciarSesion({ usuarioRepository, passwordHasher, tokenService }),
@@ -2156,6 +2287,7 @@ const app = crearApp({
     listarUsuarios: new ListarUsuarios({ usuarioRepository }),
     obtenerUsuario,
     actualizarUsuario: new ActualizarUsuario({ usuarioRepository }),
+    actualizarAccesoUsuario: new ActualizarAccesoUsuario({ usuarioRepository }),
     eliminarUsuario: new EliminarUsuario({ usuarioRepository }),
   }),
   productoController: new ProductoController({
@@ -2262,7 +2394,7 @@ dist/
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Taller 3 · Tienda</title>
+    <title>Pablo Store</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   </head>
@@ -2315,6 +2447,8 @@ async function request(path, { method = "GET", body } = {}) {
 
   if (!respuesta.ok) {
     if (respuesta.status === 401 && token) window.dispatchEvent(new Event("auth:expired"));
+    // Un 403 puede significar que la cuenta cambió de estado: se vuelve a consultar el perfil.
+    if (respuesta.status === 403 && token) window.dispatchEvent(new Event("auth:refrescar"));
     throw new ApiError(datos?.error ?? "Error inesperado del servidor", respuesta.status, datos?.detalles);
   }
   return datos;
@@ -2324,6 +2458,12 @@ export const authApi = {
   registro: (datos) => request("/auth/registro", { method: "POST", body: datos }),
   login: (credenciales) => request("/auth/login", { method: "POST", body: credenciales }),
   perfil: () => request("/auth/perfil"),
+};
+
+export const usuariosApi = {
+  listar: () => request("/usuarios"),
+  cambiarAcceso: (id, datos) => request(`/usuarios/${id}/acceso`, { method: "PATCH", body: datos }),
+  eliminar: (id) => request(`/usuarios/${id}`, { method: "DELETE" }),
 };
 
 export const productosApi = {
@@ -2367,24 +2507,30 @@ export function AuthProvider({ children }) {
     setUsuario(null);
   }, []);
 
-  // Al abrir la app, si hay un token guardado se recupera la sesión.
-  useEffect(() => {
-    if (!tokenStorage.get()) {
-      setCargando(false);
-      return;
+  // Vuelve a consultar el perfil para conocer el rol y el estado actuales de la cuenta.
+  const refrescar = useCallback(async () => {
+    if (!tokenStorage.get()) return;
+    try {
+      setUsuario(await authApi.perfil());
+    } catch {
+      logout();
     }
-    authApi
-      .perfil()
-      .then(setUsuario)
-      .catch(logout)
-      .finally(() => setCargando(false));
   }, [logout]);
 
-  // Si el backend responde 401 (token expirado), se cierra la sesión.
+  // Al abrir la app, si hay un token guardado se recupera la sesión.
+  useEffect(() => {
+    refrescar().finally(() => setCargando(false));
+  }, [refrescar]);
+
+  // 401: sesión expirada o eliminada. 403: la cuenta pudo cambiar de estado o de rol.
   useEffect(() => {
     window.addEventListener("auth:expired", logout);
-    return () => window.removeEventListener("auth:expired", logout);
-  }, [logout]);
+    window.addEventListener("auth:refrescar", refrescar);
+    return () => {
+      window.removeEventListener("auth:expired", logout);
+      window.removeEventListener("auth:refrescar", refrescar);
+    };
+  }, [logout, refrescar]);
 
   const login = async (email, password) => {
     const { token, usuario: datos } = await authApi.login({ email, password });
@@ -2398,7 +2544,16 @@ export function AuthProvider({ children }) {
     return login(email, password);
   };
 
-  const valor = { usuario, cargando, esAdmin: usuario?.rol === "admin", login, registro, logout };
+  const valor = {
+    usuario,
+    cargando,
+    esAdmin: usuario?.rol === "admin",
+    activo: usuario?.estado === "activo",
+    login,
+    registro,
+    logout,
+    refrescar,
+  };
 
   return <AuthContext.Provider value={valor}>{children}</AuthContext.Provider>;
 }
@@ -2480,9 +2635,10 @@ import { useAuth } from "../context/AuthContext";
 import { useCart } from "../context/CartContext";
 
 export default function Navbar() {
-  const { usuario, esAdmin, logout } = useAuth();
+  const { usuario, esAdmin, activo, logout } = useAuth();
   const { cantidadTotal } = useCart();
   const navigate = useNavigate();
+  const bloqueado = usuario && !activo;
 
   const salir = () => {
     logout();
@@ -2492,22 +2648,27 @@ export default function Navbar() {
   return (
     <header className="navbar">
       <NavLink to="/" className="marca">
-        Taller<span>3</span> Store
+        Pablo <span>Store</span>
       </NavLink>
 
       <nav>
-        <NavLink to="/">Catálogo</NavLink>
-        <NavLink to="/carrito">
-          Carrito {cantidadTotal > 0 && <span className="insignia">{cantidadTotal}</span>}
-        </NavLink>
-        {usuario && <NavLink to="/pedidos">{esAdmin ? "Pedidos" : "Mis pedidos"}</NavLink>}
+        {!bloqueado && (
+          <>
+            <NavLink to="/">Catálogo</NavLink>
+            <NavLink to="/carrito">
+              Carrito {cantidadTotal > 0 && <span className="insignia">{cantidadTotal}</span>}
+            </NavLink>
+            {usuario && <NavLink to="/pedidos">{esAdmin ? "Pedidos" : "Mis pedidos"}</NavLink>}
+            {esAdmin && <NavLink to="/usuarios">Usuarios</NavLink>}
+          </>
+        )}
       </nav>
 
       <div className="sesion">
         {usuario ? (
           <>
             <span className="usuario">
-              {usuario.nombre} {esAdmin && <span className="rol">admin</span>}
+              {usuario.nombre} {esAdmin && activo && <span className="rol">admin</span>}
             </span>
             <button className="btn btn-ghost" onClick={salir}>
               Salir
@@ -2518,7 +2679,7 @@ export default function Navbar() {
             <NavLink to="/login" className="btn btn-ghost">
               Entrar
             </NavLink>
-            <NavLink to="/registro" className="btn">
+            <NavLink to="/registro" className="btn btn-claro">
               Registrarse
             </NavLink>
           </>
@@ -2673,6 +2834,59 @@ export default function RegisterPage() {
           ¿Ya tienes cuenta? <Link to="/login">Inicia sesión</Link>
         </p>
       </form>
+    </section>
+  );
+}
+```
+
+#### `frontend/src/features/auth/EsperaPage.jsx`
+
+```jsx
+import { useEffect, useState } from "react";
+import { useAuth } from "../../context/AuthContext";
+
+// Pantalla para cuentas pendientes de aprobación o desactivadas.
+// Consulta el estado cada 10 segundos: al ser aprobada, la tienda se habilita sola.
+export default function EsperaPage() {
+  const { usuario, refrescar, logout } = useAuth();
+  const [comprobando, setComprobando] = useState(false);
+  const inactivo = usuario.estado === "inactivo";
+
+  useEffect(() => {
+    const intervalo = setInterval(refrescar, 10000);
+    return () => clearInterval(intervalo);
+  }, [refrescar]);
+
+  const comprobar = async () => {
+    setComprobando(true);
+    await refrescar();
+    setComprobando(false);
+  };
+
+  return (
+    <section className="espera">
+      <div className="tarjeta espera-tarjeta">
+        <div className={`espera-icono ${inactivo ? "espera-icono-inactivo" : ""}`}>{inactivo ? "✕" : "⏳"}</div>
+
+        <h1>{inactivo ? "Tu cuenta está desactivada" : "Espera a que un administrador acepte tu solicitud"}</h1>
+
+        <p>
+          {inactivo
+            ? "Un administrador desactivó tu acceso a la tienda. Si crees que es un error, comunícate con él."
+            : `Hola, ${usuario.nombre}. Tu cuenta (${usuario.email}) se creó correctamente y está en revisión. En cuanto un administrador la apruebe y te asigne permisos, podrás comprar en la tienda.`}
+        </p>
+
+        {!inactivo && <p className="nota">Esta página se actualiza sola cada 10 segundos.</p>}
+
+        <div className="acciones centradas">
+          <button className="btn" onClick={comprobar} disabled={comprobando}>
+            {comprobando ? "Comprobando..." : "Comprobar ahora"}
+          </button>
+          <button className="btn btn-secundario" onClick={logout}>
+            Cerrar sesión
+          </button>
+        </div>
+      </div>
     </section>
   );
 }
@@ -3127,33 +3341,229 @@ export default function OrdersPage() {
 }
 ```
 
+#### `frontend/src/features/users/UsersPage.jsx`
+
+```jsx
+import { useCallback, useEffect, useState } from "react";
+import { useAuth } from "../../context/AuthContext";
+import { mensajeDeError, usuariosApi } from "../../services/api";
+import Alerta from "../../components/Alerta";
+
+const FILTROS = [
+  { valor: "pendiente", texto: "Pendientes" },
+  { valor: "activo", texto: "Activos" },
+  { valor: "inactivo", texto: "Inactivos" },
+  { valor: "todos", texto: "Todos" },
+];
+
+const formatoFecha = (fecha) => new Date(fecha).toLocaleDateString("es-MX", { dateStyle: "medium" });
+
+function FilaUsuario({ u, esPropio, onAcceso, onEliminar }) {
+  const [rol, setRol] = useState(u.rol);
+
+  const cambiarRol = (nuevo) => {
+    setRol(nuevo);
+    if (u.estado !== "pendiente") onAcceso(u, { rol: nuevo }, `Se cambió el rol de ${u.nombre} a ${nuevo}`);
+  };
+
+  return (
+    <tr>
+      <td>
+        <strong>{u.nombre}</strong>
+        <br />
+        <small>{u.email}</small>
+      </td>
+      <td>{formatoFecha(u.fechaCreacion)}</td>
+      <td>
+        <span className={`chip estado-${u.estado}`}>{u.estado}</span>
+      </td>
+      <td>
+        {esPropio ? (
+          <span className="chip estado-admin">{u.rol}</span>
+        ) : (
+          <select value={rol} onChange={(e) => cambiarRol(e.target.value)}>
+            <option value="cliente">cliente</option>
+            <option value="admin">admin</option>
+          </select>
+        )}
+      </td>
+      <td>
+        {esPropio ? (
+          <small>Tu cuenta</small>
+        ) : (
+          <div className="acciones">
+            {u.estado === "pendiente" && (
+              <>
+                <button className="btn" onClick={() => onAcceso(u, { estado: "activo", rol }, `Se aprobó la cuenta de ${u.nombre} como ${rol}`)}>
+                  Aprobar
+                </button>
+                <button className="btn btn-peligro" onClick={() => onEliminar(u, "Rechazar")}>
+                  Rechazar
+                </button>
+              </>
+            )}
+            {u.estado === "activo" && (
+              <button className="btn btn-secundario" onClick={() => onAcceso(u, { estado: "inactivo" }, `Se desactivó la cuenta de ${u.nombre}`)}>
+                Desactivar
+              </button>
+            )}
+            {u.estado === "inactivo" && (
+              <>
+                <button className="btn" onClick={() => onAcceso(u, { estado: "activo" }, `Se reactivó la cuenta de ${u.nombre}`)}>
+                  Reactivar
+                </button>
+                <button className="btn btn-peligro" onClick={() => onEliminar(u, "Eliminar")}>
+                  Eliminar
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+export default function UsersPage() {
+  const { usuario: yo } = useAuth();
+  const [usuarios, setUsuarios] = useState([]);
+  const [filtro, setFiltro] = useState("pendiente");
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState("");
+  const [aviso, setAviso] = useState("");
+
+  const cargar = useCallback(async () => {
+    try {
+      setUsuarios(await usuariosApi.listar());
+    } catch (err) {
+      setError(mensajeDeError(err));
+    } finally {
+      setCargando(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    cargar();
+  }, [cargar]);
+
+  const ejecutar = async (accion, mensaje) => {
+    setError("");
+    setAviso("");
+    try {
+      await accion();
+      setAviso(mensaje);
+      cargar();
+    } catch (err) {
+      setError(mensajeDeError(err));
+      cargar();
+    }
+  };
+
+  const cambiarAcceso = (u, datos, mensaje) => ejecutar(() => usuariosApi.cambiarAcceso(u.id, datos), mensaje);
+
+  const eliminar = (u, verbo) => {
+    if (!confirm(`¿${verbo} a ${u.nombre}? Esta acción no se puede deshacer.`)) return;
+    ejecutar(() => usuariosApi.eliminar(u.id), `Se eliminó la cuenta de ${u.nombre}`);
+  };
+
+  const contar = (estado) => (estado === "todos" ? usuarios.length : usuarios.filter((u) => u.estado === estado).length);
+  const visibles = filtro === "todos" ? usuarios : usuarios.filter((u) => u.estado === filtro);
+
+  if (cargando) return <p className="estado">Cargando usuarios...</p>;
+
+  return (
+    <section>
+      <h1>Usuarios</h1>
+      <p className="subtitulo">Aprueba las cuentas nuevas, asigna permisos y administra el acceso de cada usuario.</p>
+
+      <div className="pestanas">
+        {FILTROS.map((f) => (
+          <button key={f.valor} className={filtro === f.valor ? "activa" : ""} onClick={() => setFiltro(f.valor)}>
+            {f.texto} <span className="contador">{contar(f.valor)}</span>
+          </button>
+        ))}
+      </div>
+
+      <Alerta>{error}</Alerta>
+      <Alerta tipo="exito">{aviso}</Alerta>
+
+      {visibles.length === 0 ? (
+        <p className="estado">No hay usuarios en esta categoría.</p>
+      ) : (
+        <div className="tarjeta tabla-contenedor">
+          <table>
+            <thead>
+              <tr>
+                <th>Usuario</th>
+                <th>Registro</th>
+                <th>Estado</th>
+                <th>Rol</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibles.map((u) => (
+                <FilaUsuario
+                  key={`${u.id}-${u.rol}-${u.estado}`}
+                  u={u}
+                  esPropio={u.id === yo.id}
+                  onAcceso={cambiarAcceso}
+                  onEliminar={eliminar}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+```
+
 #### `frontend/src/App.jsx`
 
 ```jsx
 import { Navigate, Route, Routes } from "react-router-dom";
+import { useAuth } from "./context/AuthContext";
 import Navbar from "./components/Navbar";
 import ProtectedRoute from "./components/ProtectedRoute";
 import LoginPage from "./features/auth/LoginPage";
 import RegisterPage from "./features/auth/RegisterPage";
+import EsperaPage from "./features/auth/EsperaPage";
 import CatalogPage from "./features/catalog/CatalogPage";
 import CartPage from "./features/orders/CartPage";
 import OrdersPage from "./features/orders/OrdersPage";
+import UsersPage from "./features/users/UsersPage";
 
 export default function App() {
+  const { usuario, activo, cargando } = useAuth();
+
+  if (cargando) return <p className="estado">Cargando...</p>;
+
+  // Una cuenta pendiente o desactivada solo ve la pantalla de espera.
+  const bloqueado = usuario && !activo;
+
   return (
     <>
       <Navbar />
       <main className="contenedor">
-        <Routes>
-          <Route path="/" element={<CatalogPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/registro" element={<RegisterPage />} />
-          <Route path="/carrito" element={<CartPage />} />
-          <Route element={<ProtectedRoute />}>
-            <Route path="/pedidos" element={<OrdersPage />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        {bloqueado ? (
+          <EsperaPage />
+        ) : (
+          <Routes>
+            <Route path="/" element={<CatalogPage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/registro" element={<RegisterPage />} />
+            <Route path="/carrito" element={<CartPage />} />
+            <Route element={<ProtectedRoute />}>
+              <Route path="/pedidos" element={<OrdersPage />} />
+            </Route>
+            <Route element={<ProtectedRoute roles={["admin"]} />}>
+              <Route path="/usuarios" element={<UsersPage />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        )}
       </main>
     </>
   );
@@ -3188,22 +3598,26 @@ createRoot(document.getElementById("root")).render(
 
 ```css
 :root {
-  --fondo: #f6f4fb;
+  --morado: #6d28d9;
+  --morado-oscuro: #4c1d95;
+  --morado-suave: #ede9fe;
+  --azul: #2563eb;
+  --azul-oscuro: #1e3a8a;
+  --azul-suave: #dbeafe;
+  --degradado: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%);
+  --degradado-barra: linear-gradient(90deg, #4c1d95 0%, #5b21b6 45%, #1d4ed8 100%);
   --superficie: #ffffff;
-  --texto: #1e1b2e;
-  --texto-suave: #6b6780;
-  --borde: #e6e1f2;
-  --primario: #6d28d9;
-  --primario-hover: #5b21b6;
-  --primario-suave: #ede9fe;
+  --texto: #1e1b3a;
+  --texto-suave: #64618a;
+  --borde: #e0e0f5;
   --exito: #059669;
   --exito-suave: #d1fae5;
   --peligro: #dc2626;
   --peligro-suave: #fee2e2;
   --aviso: #b45309;
   --aviso-suave: #fef3c7;
-  --radio: 12px;
-  --sombra: 0 1px 3px rgba(30, 27, 46, 0.06), 0 4px 16px rgba(109, 40, 217, 0.06);
+  --radio: 14px;
+  --sombra: 0 1px 3px rgba(30, 27, 58, 0.06), 0 8px 24px rgba(79, 70, 229, 0.08);
 }
 
 * {
@@ -3213,19 +3627,25 @@ createRoot(document.getElementById("root")).render(
 
 body {
   font-family: "Inter", system-ui, sans-serif;
-  background: var(--fondo);
+  background: linear-gradient(180deg, #f5f3ff 0%, #eff6ff 100%) fixed;
   color: var(--texto);
   line-height: 1.5;
+  min-height: 100vh;
 }
 
 a {
-  color: var(--primario);
+  color: var(--azul);
   text-decoration: none;
 }
 
 h1 {
-  font-size: 1.6rem;
+  font-size: 1.7rem;
   margin-bottom: 1.25rem;
+  background: var(--degradado);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  width: fit-content;
 }
 
 /* ---------- Barra de navegación ---------- */
@@ -3237,33 +3657,51 @@ h1 {
   align-items: center;
   gap: 2rem;
   padding: 0.85rem 2rem;
-  background: var(--superficie);
-  border-bottom: 1px solid var(--borde);
+  background: var(--degradado-barra);
+  box-shadow: 0 4px 18px rgba(76, 29, 149, 0.25);
 }
 
 .marca {
-  font-weight: 700;
-  font-size: 1.15rem;
-  color: var(--texto);
+  font-weight: 800;
+  font-size: 1.25rem;
+  color: #fff;
+  letter-spacing: -0.02em;
 }
 
 .marca span {
-  color: var(--primario);
+  color: #93c5fd;
 }
 
 .navbar nav {
   display: flex;
-  gap: 1.25rem;
+  gap: 1.4rem;
   flex: 1;
 }
 
 .navbar nav a {
-  color: var(--texto-suave);
+  position: relative;
+  color: rgba(255, 255, 255, 0.75);
   font-weight: 500;
+  padding: 0.2rem 0;
+}
+
+.navbar nav a:hover {
+  color: #fff;
 }
 
 .navbar nav a.active {
-  color: var(--primario);
+  color: #fff;
+}
+
+.navbar nav a.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -0.35rem;
+  height: 3px;
+  border-radius: 3px;
+  background: #93c5fd;
 }
 
 .insignia {
@@ -3271,7 +3709,7 @@ h1 {
   min-width: 1.3rem;
   padding: 0 0.35rem;
   border-radius: 999px;
-  background: var(--primario);
+  background: #60a5fa;
   color: #fff;
   font-size: 0.75rem;
   text-align: center;
@@ -3284,6 +3722,7 @@ h1 {
 }
 
 .usuario {
+  color: #fff;
   font-weight: 500;
 }
 
@@ -3291,10 +3730,19 @@ h1 {
   margin-left: 0.3rem;
   padding: 0.1rem 0.5rem;
   border-radius: 999px;
-  background: var(--primario-suave);
-  color: var(--primario);
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
   font-size: 0.72rem;
   text-transform: uppercase;
+}
+
+.navbar .btn-ghost {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+.navbar .btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 /* ---------- Estructura ---------- */
@@ -3325,6 +3773,11 @@ h1 {
   flex: 1;
 }
 
+.subtitulo {
+  color: var(--texto-suave);
+  margin: -0.75rem 0 1.25rem;
+}
+
 .estado {
   color: var(--texto-suave);
   padding: 2rem 0;
@@ -3337,18 +3790,19 @@ h1 {
   align-items: center;
   justify-content: center;
   padding: 0.55rem 1rem;
-  border: 1px solid var(--primario);
-  border-radius: 8px;
-  background: var(--primario);
+  border: none;
+  border-radius: 9px;
+  background: var(--degradado);
   color: #fff;
   font: inherit;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: filter 0.15s, box-shadow 0.15s, background 0.15s;
 }
 
 .btn:hover:not(:disabled) {
-  background: var(--primario-hover);
+  filter: brightness(1.08);
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.3);
 }
 
 .btn:disabled {
@@ -3356,23 +3810,44 @@ h1 {
   cursor: not-allowed;
 }
 
-.btn-ghost {
+.btn-ghost,
+.btn-secundario {
   background: transparent;
-  color: var(--primario);
+  border: 1px solid var(--morado);
+  color: var(--morado);
 }
 
-.btn-ghost:hover:not(:disabled) {
-  background: var(--primario-suave);
+.btn-secundario {
+  border-color: var(--azul);
+  color: var(--azul);
+}
+
+.btn-ghost:hover:not(:disabled),
+.btn-secundario:hover:not(:disabled) {
+  background: var(--morado-suave);
+  box-shadow: none;
+  filter: none;
+}
+
+.btn-secundario:hover:not(:disabled) {
+  background: var(--azul-suave);
+}
+
+.btn-claro {
+  background: #fff;
+  color: var(--morado);
 }
 
 .btn-peligro {
   background: transparent;
-  border-color: var(--peligro);
+  border: 1px solid var(--peligro);
   color: var(--peligro);
 }
 
 .btn-peligro:hover:not(:disabled) {
   background: var(--peligro-suave);
+  box-shadow: none;
+  filter: none;
 }
 
 .btn-bloque {
@@ -3383,6 +3858,10 @@ h1 {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+
+.acciones.centradas {
+  justify-content: center;
 }
 
 /* ---------- Formularios ---------- */
@@ -3397,6 +3876,10 @@ h1 {
   margin: 0;
 }
 
+.formulario h2 {
+  color: var(--morado-oscuro);
+}
+
 label {
   display: flex;
   flex-direction: column;
@@ -3406,18 +3889,26 @@ label {
 }
 
 input,
-textarea {
+textarea,
+select {
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--borde);
-  border-radius: 8px;
+  border-radius: 9px;
   font: inherit;
   background: #fff;
+  color: var(--texto);
+}
+
+select {
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
 }
 
 input:focus,
-textarea:focus {
-  outline: 2px solid var(--primario-suave);
-  border-color: var(--primario);
+textarea:focus,
+select:focus {
+  outline: 3px solid var(--azul-suave);
+  border-color: var(--azul);
 }
 
 small {
@@ -3436,6 +3927,10 @@ small {
   margin: 2rem auto;
 }
 
+.auth .tarjeta {
+  border-top: 4px solid var(--morado);
+}
+
 .nota {
   text-align: center;
   font-size: 0.9rem;
@@ -3450,7 +3945,7 @@ small {
 /* ---------- Alertas ---------- */
 .alerta {
   padding: 0.7rem 1rem;
-  border-radius: 8px;
+  border-radius: 9px;
   margin-bottom: 1rem;
   font-size: 0.92rem;
 }
@@ -3473,9 +3968,25 @@ small {
 }
 
 .producto {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
+  overflow: hidden;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.producto::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 4px;
+  background: var(--degradado);
+}
+
+.producto:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(79, 70, 229, 0.16);
 }
 
 .producto-cabecera {
@@ -3496,17 +4007,21 @@ small {
 }
 
 .precio {
-  font-size: 1.3rem;
-  font-weight: 700;
-  color: var(--primario);
+  font-size: 1.35rem;
+  font-weight: 800;
+  background: var(--degradado);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  width: fit-content;
 }
 
 .stock {
   white-space: nowrap;
   padding: 0.1rem 0.55rem;
   border-radius: 999px;
-  background: var(--exito-suave);
-  color: var(--exito);
+  background: var(--azul-suave);
+  color: var(--azul);
   font-size: 0.75rem;
   font-weight: 600;
 }
@@ -3524,15 +4039,16 @@ small {
   display: grid;
   place-items: center;
   padding: 1rem;
-  background: rgba(30, 27, 46, 0.45);
+  background: rgba(30, 27, 58, 0.5);
 }
 
 .modal {
   width: 100%;
   max-width: 480px;
+  border-top: 4px solid var(--azul);
 }
 
-/* ---------- Carrito ---------- */
+/* ---------- Tablas ---------- */
 .tabla-contenedor {
   padding: 0;
   overflow-x: auto;
@@ -3548,16 +4064,26 @@ td {
   padding: 0.8rem 1rem;
   text-align: left;
   border-bottom: 1px solid var(--borde);
+  vertical-align: middle;
+}
+
+thead {
+  background: linear-gradient(90deg, var(--morado-suave), var(--azul-suave));
 }
 
 th {
-  font-size: 0.8rem;
-  color: var(--texto-suave);
+  font-size: 0.78rem;
+  color: var(--morado-oscuro);
   text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 tbody tr:last-child td {
   border-bottom: none;
+}
+
+tbody tr:hover {
+  background: #fafaff;
 }
 
 .cantidad {
@@ -3579,11 +4105,19 @@ tbody tr:last-child td {
   padding: 3rem 0;
 }
 
+.vacio h1 {
+  margin: 0 auto 1.25rem;
+}
+
 /* ---------- Pedidos ---------- */
 .lista-pedidos {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+.pedido {
+  border-left: 4px solid var(--azul);
 }
 
 .pedido-cabecera,
@@ -3593,6 +4127,10 @@ tbody tr:last-child td {
   align-items: center;
   flex-wrap: wrap;
   gap: 0.75rem;
+}
+
+.pedido h3 {
+  color: var(--morado-oscuro);
 }
 
 .detalle {
@@ -3610,7 +4148,10 @@ tbody tr:last-child td {
   font-size: 0.92rem;
 }
 
-.estado-pedido {
+/* ---------- Etiquetas de estado (pedidos y usuarios) ---------- */
+.estado-pedido,
+.chip {
+  display: inline-block;
   padding: 0.2rem 0.75rem;
   border-radius: 999px;
   font-size: 0.8rem;
@@ -3623,7 +4164,8 @@ tbody tr:last-child td {
   color: var(--aviso);
 }
 
-.estado-completado {
+.estado-completado,
+.estado-activo {
   background: var(--exito-suave);
   color: var(--exito);
 }
@@ -3631,6 +4173,113 @@ tbody tr:last-child td {
 .estado-cancelado {
   background: var(--peligro-suave);
   color: var(--peligro);
+}
+
+.estado-inactivo {
+  background: #e5e7eb;
+  color: #4b5563;
+}
+
+.estado-admin {
+  background: var(--morado-suave);
+  color: var(--morado);
+}
+
+/* ---------- Usuarios ---------- */
+.pestanas {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+
+.pestanas button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--borde);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--texto-suave);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.pestanas button.activa {
+  background: var(--degradado);
+  border-color: transparent;
+  color: #fff;
+}
+
+.contador {
+  min-width: 1.4rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--azul-suave);
+  color: var(--azul);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.pestanas button.activa .contador {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+/* ---------- Pantalla de espera ---------- */
+.espera {
+  display: grid;
+  place-items: center;
+  min-height: 60vh;
+}
+
+.espera-tarjeta {
+  max-width: 560px;
+  text-align: center;
+  padding: 2.5rem 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  border-top: 4px solid var(--morado);
+}
+
+.espera-tarjeta h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.espera-tarjeta p {
+  color: var(--texto-suave);
+}
+
+.espera-icono {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--degradado);
+  color: #fff;
+  font-size: 2rem;
+  animation: latido 2s ease-in-out infinite;
+}
+
+.espera-icono-inactivo {
+  background: #9ca3af;
+  animation: none;
+}
+
+@keyframes latido {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 14px rgba(37, 99, 235, 0);
+  }
 }
 
 @media (max-width: 720px) {
@@ -3650,7 +4299,7 @@ tbody tr:last-child td {
 
 ## 6. Especificación de endpoints
 
-Base URL: `http://localhost:3000/api`. Las rutas marcadas con **JWT** requieren el encabezado `Authorization: Bearer <token>`. Los errores siempre responden con el formato `{ "error": "mensaje", "detalles": [...] }` (el campo `detalles` solo aparece en errores de validación).
+Base URL: `http://localhost:3000/api`. Las rutas marcadas con **JWT** requieren el encabezado `Authorization: Bearer <token>` y una cuenta en estado `activo`; la única excepción es `GET /auth/perfil`, que también responde a cuentas pendientes o inactivas para mostrar la pantalla de espera. Una cuenta no activa recibe `403` en el resto de rutas protegidas. Los errores siempre responden con el formato `{ "error": "mensaje", "detalles": [...] }` (el campo `detalles` solo aparece en errores de validación).
 
 ### 6.1 Autenticación
 
@@ -3667,6 +4316,7 @@ Base URL: `http://localhost:3000/api`. Las rutas marcadas con **JWT** requieren 
 | GET | `/usuarios` | JWT admin | — | 200 lista · 401 · 403 |
 | GET | `/usuarios/:id` | JWT admin | — | 200 usuario · 400 id inválido · 404 |
 | PUT | `/usuarios/:id` | JWT admin | `{ "nombre"?, "email"?, "rol"? }` | 200 usuario · 400 · 404 · 409 email duplicado o cambio del propio rol |
+| PATCH | `/usuarios/:id/acceso` | JWT admin | `{ "estado"?: "activo" \| "inactivo", "rol"?: "cliente" \| "admin" }` | 200 usuario · 400 valor no permitido · 404 · 409 acceso de la propia cuenta |
 | DELETE | `/usuarios/:id` | JWT admin | — | 204 · 404 · 409 tiene pedidos o es la propia cuenta |
 
 ### 6.3 Productos
@@ -3696,6 +4346,8 @@ Base URL: `http://localhost:3000/api`. Las rutas marcadas con **JWT** requieren 
 - **Total:** se calcula en el servidor con los precios vigentes, en centavos para evitar errores de redondeo. El frontend nunca envía precios.
 - **Estados:** `pendiente → completado` o `pendiente → cancelado`. Cancelar devuelve el stock. `completado` y `cancelado` son estados finales.
 - **Permisos:** el cliente solo ve y cancela sus propios pedidos; el administrador gestiona todo.
+- **Aprobación de cuentas:** todo registro nuevo inicia `pendiente`. El administrador lo aprueba asignando un rol, o lo rechaza (eliminándolo). Las cuentas activas pueden desactivarse y reactivarse; ninguna vuelta a `pendiente`. El administrador no puede modificar el acceso de su propia cuenta.
+- **Sesión siempre actualizada:** el middleware `authenticate` consulta el usuario en la base de datos en cada petición mediante el caso de uso `VerificarSesion`, por lo que los cambios de rol o de estado aplican de inmediato.
 
 ### 6.6 Ejemplo de prueba en Postman
 
@@ -3719,5 +4371,6 @@ Base URL: `http://localhost:3000/api`. Las rutas marcadas con **JWT** requieren 
 | `relation "usuarios" does not exist` | El script se ejecutó en otra base | Abrir el Query Tool sobre `taller3_24` y repetir |
 | `Falta la variable de entorno ...` | No existe `backend/.env` | `cp .env.example .env` y completarlo |
 | El frontend muestra "No se pudo conectar con el servidor" | Backend apagado | Arrancar la terminal 1 (Paso 5) |
-| Tras cambiar el rol a admin no aparecen los botones | El token anterior conserva el rol viejo | Salir e iniciar sesión de nuevo |
+| Tras cambiar el rol no aparecen los botones | La página aún no consultó el perfil | Recargar la página |
+| `column "estado" does not exist` | La base se creó antes del control de acceso | Ejecutar `database/migracion_estado_usuarios.sql` |
 | `EADDRINUSE: address already in use :::3000` | Otro proceso usa el puerto (por ejemplo, el proyecto anterior) | Cerrar la otra terminal con `Ctrl + C` |

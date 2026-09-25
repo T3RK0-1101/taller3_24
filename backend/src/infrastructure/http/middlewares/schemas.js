@@ -14,6 +14,10 @@ module.exports = {
     email: { type: "string" },
     rol: { type: "string", enum: ["cliente", "admin"] },
   },
+  accesoUsuario: {
+    rol: { type: "string", enum: ["cliente", "admin"] },
+    estado: { type: "string", enum: ["activo", "inactivo"] },
+  },
   crearProducto: {
     nombre: { type: "string", required: true },
     descripcion: { type: "string" },

@@ -25,6 +25,8 @@ const ObtenerUsuario = require("./application/use-cases/usuarios/ObtenerUsuario"
 const ListarUsuarios = require("./application/use-cases/usuarios/ListarUsuarios");
 const ActualizarUsuario = require("./application/use-cases/usuarios/ActualizarUsuario");
 const EliminarUsuario = require("./application/use-cases/usuarios/EliminarUsuario");
+const VerificarSesion = require("./application/use-cases/usuarios/VerificarSesion");
+const ActualizarAccesoUsuario = require("./application/use-cases/usuarios/ActualizarAccesoUsuario");
 const CrearProducto = require("./application/use-cases/productos/CrearProducto");
 const ListarProductos = require("./application/use-cases/productos/ListarProductos");
 const ObtenerProducto = require("./application/use-cases/productos/ObtenerProducto");
@@ -52,7 +54,7 @@ const obtenerUsuario = new ObtenerUsuario({ usuarioRepository });
 
 const app = crearApp({
   corsOrigin: config.corsOrigin,
-  authenticate: crearAuthenticate(tokenService),
+  authenticate: crearAuthenticate(new VerificarSesion({ tokenService, usuarioRepository })),
   authController: new AuthController({
     registrarUsuario: new RegistrarUsuario({ usuarioRepository, passwordHasher }),
     iniciarSesion: new IniciarSesion({ usuarioRepository, passwordHasher, tokenService }),
@@ -62,6 +64,7 @@ const app = crearApp({
     listarUsuarios: new ListarUsuarios({ usuarioRepository }),
     obtenerUsuario,
     actualizarUsuario: new ActualizarUsuario({ usuarioRepository }),
+    actualizarAccesoUsuario: new ActualizarAccesoUsuario({ usuarioRepository }),
     eliminarUsuario: new EliminarUsuario({ usuarioRepository }),
   }),
   productoController: new ProductoController({

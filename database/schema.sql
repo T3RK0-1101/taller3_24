@@ -15,9 +15,11 @@ CREATE TABLE usuarios (
   email           VARCHAR(150) NOT NULL,
   password        VARCHAR(255) NOT NULL,
   rol             VARCHAR(20)  NOT NULL DEFAULT 'cliente',
+  estado          VARCHAR(20)  NOT NULL DEFAULT 'pendiente',
   fecha_creacion  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   CONSTRAINT uq_usuarios_email UNIQUE (email),
-  CONSTRAINT ck_usuarios_rol CHECK (rol IN ('cliente', 'admin'))
+  CONSTRAINT ck_usuarios_rol CHECK (rol IN ('cliente', 'admin')),
+  CONSTRAINT ck_usuarios_estado CHECK (estado IN ('pendiente', 'activo', 'inactivo'))
 );
 
 -- ---------- productos ----------
@@ -62,6 +64,7 @@ CREATE TABLE detalle_pedidos (
 );
 
 -- ---------- índices ----------
+CREATE INDEX idx_usuarios_estado      ON usuarios (estado);
 CREATE INDEX idx_productos_nombre      ON productos (LOWER(nombre));
 CREATE INDEX idx_pedidos_usuario_id    ON pedidos (usuario_id);
 CREATE INDEX idx_pedidos_estado        ON pedidos (estado);

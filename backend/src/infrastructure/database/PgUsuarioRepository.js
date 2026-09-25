@@ -10,6 +10,7 @@ const aEntidad = (fila) =>
     email: fila.email,
     password: fila.password,
     rol: fila.rol,
+    estado: fila.estado,
     fechaCreacion: fila.fecha_creacion,
   });
 
@@ -21,9 +22,9 @@ class PgUsuarioRepository extends UsuarioRepository {
 
   async crear(usuario) {
     const { rows } = await this.pg.query(
-      `INSERT INTO usuarios (nombre, email, password, rol)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [usuario.nombre, usuario.email, usuario.password, usuario.rol]
+      `INSERT INTO usuarios (nombre, email, password, rol, estado)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [usuario.nombre, usuario.email, usuario.password, usuario.rol, usuario.estado]
     );
     return aEntidad(rows[0]);
   }
@@ -38,16 +39,20 @@ class PgUsuarioRepository extends UsuarioRepository {
     return aEntidad(rows[0]);
   }
 
+  // Los pendientes aparecen primero para que el administrador los atienda.
   async listar() {
-    const { rows } = await this.pg.query("SELECT * FROM usuarios ORDER BY id");
+    const { rows } = await this.pg.query(
+      `SELECT * FROM usuarios
+       ORDER BY CASE estado WHEN 'pendiente' THEN 0 WHEN 'activo' THEN 1 ELSE 2 END, id`
+    );
     return rows.map(aEntidad);
   }
 
   async actualizar(usuario) {
     const { rows } = await this.pg.query(
-      `UPDATE usuarios SET nombre = $1, email = $2, rol = $3
-       WHERE id = $4 RETURNING *`,
-      [usuario.nombre, usuario.email, usuario.rol, usuario.id]
+      `UPDATE usuarios SET nombre = $1, email = $2, rol = $3, estado = $4
+       WHERE id = $5 RETURNING *`,
+      [usuario.nombre, usuario.email, usuario.rol, usuario.estado, usuario.id]
     );
     return aEntidad(rows[0]);
   }
