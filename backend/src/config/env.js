@@ -21,5 +21,19 @@ module.exports = {
     secret: requerida("JWT_SECRET"),
     expiresIn: process.env.JWT_EXPIRES_IN || "2h",
   },
+  email: {
+    host: process.env.SMTP_HOST || "",
+    port: Number(process.env.SMTP_PORT) || 587,
+    user: process.env.SMTP_USER || "",
+    pass: process.env.SMTP_PASS || "",
+    from: process.env.MAIL_FROM || "Pablo Store <no-reply@pablostore.com>",
+    adminEmail: process.env.ADMIN_EMAIL || "",
+  },
+  pago: {
+    banco: process.env.PAGO_BANCO || "Banco Ejemplo",
+    titular: process.env.PAGO_TITULAR || "Pablo Store",
+    clabe: process.env.PAGO_CLABE || "000000000000000000",
+    plazoHoras: Number(process.env.PAGO_PLAZO_HORAS) || 48,
+  },
   bcryptRounds: Number(process.env.BCRYPT_ROUNDS) || 10,
 };

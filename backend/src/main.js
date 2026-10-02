@@ -9,6 +9,7 @@ const PgPedidoRepository = require("./infrastructure/database/PgPedidoRepository
 const PgUnitOfWork = require("./infrastructure/database/PgUnitOfWork");
 const BcryptPasswordHasher = require("./infrastructure/security/BcryptPasswordHasher");
 const JwtTokenService = require("./infrastructure/security/JwtTokenService");
+const NodemailAdapter = require("./infrastructure/email/NodemailAdapter");
 const crearAuthenticate = require("./infrastructure/http/middlewares/authenticate");
 const crearApp = require("./infrastructure/http/app");
 
@@ -48,6 +49,7 @@ const { usuarioRepository, productoRepository, pedidoRepository } = crearReposit
 const unitOfWork = new PgUnitOfWork(pool, crearRepositorios);
 const passwordHasher = new BcryptPasswordHasher(config.bcryptRounds);
 const tokenService = new JwtTokenService(config.jwt);
+const emailService = new NodemailAdapter({ emailConfig: config.email, pagoConfig: config.pago });
 
 // Casos de uso
 const obtenerUsuario = new ObtenerUsuario({ usuarioRepository });
@@ -75,7 +77,7 @@ const app = crearApp({
     eliminarProducto: new EliminarProducto({ productoRepository }),
   }),
   pedidoController: new PedidoController({
-    crearPedido: new CrearPedido({ unitOfWork }),
+    crearPedido: new CrearPedido({ unitOfWork, emailService }),
     listarPedidos: new ListarPedidos({ pedidoRepository }),
     obtenerPedido: new ObtenerPedido({ pedidoRepository }),
     actualizarEstadoPedido: new ActualizarEstadoPedido({ unitOfWork }),
