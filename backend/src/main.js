@@ -10,6 +10,7 @@ const PgUnitOfWork = require("./infrastructure/database/PgUnitOfWork");
 const BcryptPasswordHasher = require("./infrastructure/security/BcryptPasswordHasher");
 const JwtTokenService = require("./infrastructure/security/JwtTokenService");
 const NodemailAdapter = require("./infrastructure/email/NodemailAdapter");
+const AnalyticsRepositoryAdapter = require("./infrastructure/database/AnalyticsRepositoryAdapter");
 const crearAuthenticate = require("./infrastructure/http/middlewares/authenticate");
 const crearApp = require("./infrastructure/http/app");
 
@@ -18,6 +19,7 @@ const AuthController = require("./infrastructure/http/controllers/AuthController
 const UsuarioController = require("./infrastructure/http/controllers/UsuarioController");
 const ProductoController = require("./infrastructure/http/controllers/ProductoController");
 const PedidoController = require("./infrastructure/http/controllers/PedidoController");
+const ReporteController = require("./infrastructure/http/controllers/ReporteController");
 
 // Casos de uso
 const RegistrarUsuario = require("./application/use-cases/usuarios/RegistrarUsuario");
@@ -38,6 +40,7 @@ const ListarPedidos = require("./application/use-cases/pedidos/ListarPedidos");
 const ObtenerPedido = require("./application/use-cases/pedidos/ObtenerPedido");
 const ActualizarEstadoPedido = require("./application/use-cases/pedidos/ActualizarEstadoPedido");
 const EliminarPedido = require("./application/use-cases/pedidos/EliminarPedido");
+const AnalyticsService = require("./application/use-cases/reportes/AnalyticsService");
 
 // Adaptadores
 const crearRepositorios = (db) => ({
@@ -50,9 +53,11 @@ const unitOfWork = new PgUnitOfWork(pool, crearRepositorios);
 const passwordHasher = new BcryptPasswordHasher(config.bcryptRounds);
 const tokenService = new JwtTokenService(config.jwt);
 const emailService = new NodemailAdapter({ emailConfig: config.email, pagoConfig: config.pago });
+const analyticsRepository = new AnalyticsRepositoryAdapter(pool);
 
 // Casos de uso
 const obtenerUsuario = new ObtenerUsuario({ usuarioRepository });
+const analyticsService = new AnalyticsService({ analyticsRepository, zonaHoraria: config.zonaHoraria });
 
 const app = crearApp({
   corsOrigin: config.corsOrigin,
@@ -83,6 +88,7 @@ const app = crearApp({
     actualizarEstadoPedido: new ActualizarEstadoPedido({ unitOfWork }),
     eliminarPedido: new EliminarPedido({ unitOfWork }),
   }),
+  reporteController: new ReporteController({ analyticsService }),
 });
 
 async function iniciar() {

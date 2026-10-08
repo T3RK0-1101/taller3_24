@@ -88,11 +88,16 @@ export default function OrdersPage() {
                 <strong>Total: {formatoMoneda(pedido.total)}</strong>
                 <div className="acciones">
                   {pedido.estado === "pendiente" && gestionaPedidos && (
-                    <button className="btn" onClick={() => cambiarEstado(pedido, "completado")}>
-                      Marcar completado
+                    <button className="btn" onClick={() => cambiarEstado(pedido, "pagado")}>
+                      Marcar pagado
                     </button>
                   )}
-                  {pedido.estado === "pendiente" && (
+                  {pedido.estado === "pagado" && gestionaPedidos && (
+                    <button className="btn" onClick={() => cambiarEstado(pedido, "enviado")}>
+                      Marcar enviado
+                    </button>
+                  )}
+                  {(pedido.estado === "pendiente" || (pedido.estado === "pagado" && gestionaPedidos)) && (
                     <button className="btn btn-ghost" onClick={() => cambiarEstado(pedido, "cancelado")}>
                       Cancelar
                     </button>

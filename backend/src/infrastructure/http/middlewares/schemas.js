@@ -34,6 +34,6 @@ module.exports = {
     items: { type: "array", required: true },
   },
   estadoPedido: {
-    estado: { type: "string", required: true, enum: ["pendiente", "completado", "cancelado"] },
+    estado: { type: "string", required: true, enum: ["pendiente", "pagado", "enviado", "cancelado"] },
   },
 };

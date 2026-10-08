@@ -1,9 +1,10 @@
 const DomainError = require("../errors/DomainError");
 
-const ESTADOS = ["pendiente", "completado", "cancelado"];
+const ESTADOS = ["pendiente", "pagado", "enviado", "cancelado"];
 const TRANSICIONES = {
-  pendiente: ["completado", "cancelado"],
-  completado: [],
+  pendiente: ["pagado", "cancelado"],
+  pagado: ["enviado", "cancelado"],
+  enviado: [],
   cancelado: [],
 };
 

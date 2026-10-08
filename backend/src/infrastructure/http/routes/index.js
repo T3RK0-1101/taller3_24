@@ -4,7 +4,14 @@ const requireActivo = require("../middlewares/requireActivo");
 const { validate, validateId } = require("../middlewares/validate");
 const schemas = require("../middlewares/schemas");
 
-function crearRutas({ authenticate, authController, usuarioController, productoController, pedidoController }) {
+function crearRutas({
+  authenticate,
+  authController,
+  usuarioController,
+  productoController,
+  pedidoController,
+  reporteController,
+}) {
   const router = Router();
   const activo = [authenticate, requireActivo];
   const soloAdmin = [...activo, authorize("admin")];
@@ -36,6 +43,13 @@ function crearRutas({ authenticate, authController, usuarioController, productoC
   router.get("/pedidos/:id", ...activo, validateId, pedidoController.obtener);
   router.patch("/pedidos/:id/estado", ...activo, validateId, validate(schemas.estadoPedido), pedidoController.cambiarEstado);
   router.delete("/pedidos/:id", ...soloAdmin, validateId, pedidoController.eliminar);
+
+  // Reportes analíticos (solo administradores)
+  router.get("/reportes/resumen", ...soloAdmin, reporteController.resumen);
+  router.get("/reportes/productos-mas-vendidos", ...soloAdmin, reporteController.productos);
+  router.get("/reportes/ingresos", ...soloAdmin, reporteController.ingresos);
+  router.get("/reportes/estados-pedidos", ...soloAdmin, reporteController.estados);
+  router.get("/reportes/ticket-promedio", ...soloAdmin, reporteController.ticket);
 
   return router;
 }

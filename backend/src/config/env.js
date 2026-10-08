@@ -35,5 +35,6 @@ module.exports = {
     clabe: process.env.PAGO_CLABE || "000000000000000000",
     plazoHoras: Number(process.env.PAGO_PLAZO_HORAS) || 48,
   },
+  zonaHoraria: process.env.REPORTES_ZONA_HORARIA || "America/Mexico_City",
   bcryptRounds: Number(process.env.BCRYPT_ROUNDS) || 10,
 };

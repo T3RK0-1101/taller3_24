@@ -9,6 +9,7 @@ import CatalogPage from "./features/catalog/CatalogPage";
 import CartPage from "./features/orders/CartPage";
 import OrdersPage from "./features/orders/OrdersPage";
 import UsersPage from "./features/users/UsersPage";
+import DashboardPage from "./features/dashboard/DashboardPage";
 
 export default function App() {
   const { usuario, activo, cargando } = useAuth();
@@ -34,6 +35,7 @@ export default function App() {
               <Route path="/pedidos" element={<OrdersPage />} />
             </Route>
             <Route element={<ProtectedRoute roles={["admin"]} />}>
+              <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/usuarios" element={<UsersPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

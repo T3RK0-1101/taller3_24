@@ -29,6 +29,7 @@ export default function Navbar() {
               </NavLink>
             )}
             {usuario && <NavLink to="/pedidos">{gestionaPedidos ? "Pedidos" : "Mis pedidos"}</NavLink>}
+            {esAdmin && <NavLink to="/dashboard">Dashboard</NavLink>}
             {esAdmin && <NavLink to="/usuarios">Usuarios</NavLink>}
           </>
         )}

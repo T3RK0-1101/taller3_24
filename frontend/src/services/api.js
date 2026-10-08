@@ -72,6 +72,13 @@ export const pedidosApi = {
   eliminar: (id) => request(`/pedidos/${id}`, { method: "DELETE" }),
 };
 
+export const reportesApi = {
+  resumen: (filtros = {}) => {
+    const consulta = new URLSearchParams(Object.entries(filtros).filter(([, valor]) => valor)).toString();
+    return request(`/reportes/resumen${consulta ? `?${consulta}` : ""}`);
+  },
+};
+
 // Convierte un ApiError en un texto legible para mostrar en pantalla.
 export const mensajeDeError = (error) =>
   error?.detalles?.length ? `${error.message}: ${error.detalles.join(". ")}` : error?.message ?? "Error inesperado";

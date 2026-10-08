@@ -44,7 +44,7 @@ CREATE TABLE pedidos (
   CONSTRAINT fk_pedidos_usuario FOREIGN KEY (usuario_id)
     REFERENCES usuarios (id) ON DELETE RESTRICT,
   CONSTRAINT ck_pedidos_total  CHECK (total >= 0),
-  CONSTRAINT ck_pedidos_estado CHECK (estado IN ('pendiente', 'completado', 'cancelado'))
+  CONSTRAINT ck_pedidos_estado CHECK (estado IN ('pendiente', 'pagado', 'enviado', 'cancelado'))
 );
 
 -- ---------- detalle_pedidos ----------
